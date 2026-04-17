@@ -34,6 +34,26 @@ export interface ApexClassSummary {
   summary: Record<string, unknown>;
 }
 
+export interface TriggerSummary {
+  api_name: string;
+  object_name: string;
+  status: string;
+  events: string[];
+}
+
+export interface FlowSummary {
+  api_name: string;
+  label: string;
+  process_type: string;
+  status: string;
+}
+
+export interface WorkflowRuleSummary {
+  api_name: string;
+  object_name: string;
+  active: boolean;
+}
+
 /**
  * Lightweight top-level list of every SObject in the org via describeGlobal.
  */
@@ -146,11 +166,89 @@ export async function readOrganization(conn: Connection) {
     OrganizationType: string;
     IsSandbox: boolean;
     TrialExpirationDate: string | null;
+    CreatedDate: string;
   };
   const res = await conn.query<Org>(
-    "SELECT Id, Name, OrganizationType, IsSandbox, TrialExpirationDate FROM Organization LIMIT 1",
+    "SELECT Id, Name, OrganizationType, IsSandbox, TrialExpirationDate, CreatedDate FROM Organization LIMIT 1",
   );
   const row = res.records[0];
   if (!row) throw new Error("Organization record not returned");
   return row;
+}
+
+export async function listApexTriggers(conn: Connection): Promise<TriggerSummary[]> {
+  type Row = {
+    Id: string;
+    Name: string;
+    TableEnumOrId: string;
+    Status: string;
+    Body: string | null;
+  };
+  const res = await conn.tooling.query<Row>(
+    "SELECT Id, Name, TableEnumOrId, Status, Body FROM ApexTrigger",
+  );
+
+  return (res.records as Row[]).map((r) => {
+    const body = r.Body ?? "";
+    const match = /trigger\s+\w+\s+on\s+\w+\s*\(([^)]+)\)/i.exec(body);
+    const events = match
+      ? match[1].split(",").map((e) => e.trim().toLowerCase())
+      : [];
+    return {
+      api_name: r.Name,
+      object_name: r.TableEnumOrId,
+      status: r.Status,
+      events,
+    };
+  });
+}
+
+export async function listFlows(conn: Connection): Promise<FlowSummary[]> {
+  type Row = {
+    Label: string;
+    Id: string;
+    ApiName: string;
+    MasterLabel: string;
+    ProcessType: string;
+    IsActive: boolean;
+    VersionNumber: number;
+    TriggerType: string;
+    NamespacePrefix: string;
+  };
+  // Query Flow (version objects) — ProcessType and Status live here, not on FlowDefinition.
+  // Deduplicate by ApiName keeping the Active version; fall back to any version seen last.
+  const res = await conn.query<Row>(
+    "SELECT Id, ApiName, ProcessType, Label, IsActive, VersionNumber, TriggerType, NamespacePrefix FROM FlowDefinitionView ORDER BY ApiName ASC",
+  );
+
+  const byKey = new Map<string, FlowSummary>();
+  for (const r of res.records as Row[]) {
+    if (!byKey.has(r.ApiName)) {
+      byKey.set(r.ApiName, {
+        api_name: r.ApiName,
+        label: r.Label,
+        process_type: r.ProcessType,
+        status: r.IsActive ? "Active" : "Inactive",
+      });
+    }
+  }
+  return Array.from(byKey.values());
+}
+
+export async function listWorkflowRules(conn: Connection): Promise<WorkflowRuleSummary[]> {
+  type Row = {
+    Id: string;
+    Name: string;
+    TableEnumOrId: string;
+  };
+  // Active status is not a queryable column on WorkflowRule via Tooling API.
+  const res = await conn.tooling.query<Row>(
+    "SELECT Id, Name, TableEnumOrId FROM WorkflowRule",
+  );
+
+  return (res.records as Row[]).map((r) => ({
+    api_name: r.Name,
+    object_name: r.TableEnumOrId,
+    active: false,
+  }));
 }

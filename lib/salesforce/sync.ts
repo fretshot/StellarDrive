@@ -3,16 +3,20 @@ import { getSalesforceConnection } from "@/lib/salesforce/connection";
 import {
   describeObject,
   listApexClasses,
+  listApexTriggers,
   listObjects,
+  listWorkflowRules,
   readOrganization,
   type FieldSummary,
   type ObjectSummary,
+  type TriggerSummary,
+  type WorkflowRuleSummary,
 } from "@/lib/salesforce/metadata";
 import { normalizeOrgType } from "@/lib/salesforce/types";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { writeAudit } from "@/lib/audit";
 
-export type SyncKind = "objects" | "fields" | "classes" | "full";
+export type SyncKind = "objects" | "fields" | "classes" | "triggers" | "workflows" | "full";
 
 /** Core SObjects we always describe in full when syncing "fields" or "full". */
 const STANDARD_CORE = new Set([
@@ -37,6 +41,8 @@ export interface SyncResult {
   objects: number;
   fields: number;
   classes: number;
+  triggers: number;
+  workflows: number;
 }
 
 export async function runMetadataSync(params: {
@@ -62,17 +68,20 @@ export async function runMetadataSync(params: {
     metadata: { kind, job_id: job.id },
   });
 
-  const counts = { objects: 0, fields: 0, classes: 0 };
+  const counts = { objects: 0, fields: 0, classes: 0, triggers: 0, workflows: 0 };
 
   try {
     const conn = await getSalesforceConnection(orgId, userId);
 
-    // Keep org_type accurate on every sync (cheap).
+    // Keep org_type and sf_created_at accurate on every sync (cheap).
     try {
       const org = await readOrganization(conn);
       await admin
         .from("connected_salesforce_orgs")
-        .update({ org_type: normalizeOrgType(org.OrganizationType, org.IsSandbox) })
+        .update({
+          org_type: normalizeOrgType(org.OrganizationType, org.IsSandbox),
+          sf_created_at: org.CreatedDate,
+        })
         .eq("id", orgId);
     } catch {
       // Non-fatal — sync can proceed without re-classifying.
@@ -95,6 +104,18 @@ export async function runMetadataSync(params: {
       const classes = await listApexClasses(conn);
       await upsertClasses(admin, orgId, classes);
       counts.classes = classes.length;
+    }
+
+    if (kind === "triggers" || kind === "full") {
+      const triggers = await listApexTriggers(conn);
+      await upsertTriggers(admin, orgId, triggers);
+      counts.triggers = triggers.length;
+    }
+
+    if (kind === "workflows" || kind === "full") {
+      const workflows = await listWorkflowRules(conn);
+      await upsertWorkflows(admin, orgId, workflows);
+      counts.workflows = workflows.length;
     }
 
     await admin
@@ -251,4 +272,49 @@ async function syncFields(
   }
 
   return total;
+}
+
+async function upsertTriggers(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  orgId: string,
+  triggers: TriggerSummary[],
+) {
+  if (triggers.length === 0) return;
+  const now = new Date().toISOString();
+  const rows = triggers.map((t) => ({
+    org_id: orgId,
+    api_name: t.api_name,
+    object_name: t.object_name,
+    status: t.status,
+    events: t.events,
+    last_synced_at: now,
+  }));
+  for (let i = 0; i < rows.length; i += 500) {
+    const { error } = await admin
+      .from("salesforce_metadata_triggers")
+      .upsert(rows.slice(i, i + 500), { onConflict: "org_id,api_name" });
+    if (error) throw new Error(`upsert triggers: ${error.message}`);
+  }
+}
+
+async function upsertWorkflows(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  orgId: string,
+  workflows: WorkflowRuleSummary[],
+) {
+  if (workflows.length === 0) return;
+  const now = new Date().toISOString();
+  const rows = workflows.map((w) => ({
+    org_id: orgId,
+    api_name: w.api_name,
+    object_name: w.object_name,
+    active: w.active,
+    last_synced_at: now,
+  }));
+  for (let i = 0; i < rows.length; i += 500) {
+    const { error } = await admin
+      .from("salesforce_metadata_workflows")
+      .upsert(rows.slice(i, i + 500), { onConflict: "org_id,api_name" });
+    if (error) throw new Error(`upsert workflows: ${error.message}`);
+  }
 }

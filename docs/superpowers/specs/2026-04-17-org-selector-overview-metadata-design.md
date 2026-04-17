@@ -20,7 +20,7 @@ Three connected features delivered together:
 The topbar uses a **cookie + `router.refresh()`** pattern:
 
 - `Topbar` (server component) fetches the user's org list and reads the `active_org_id` cookie from the request. It passes both to `OrgSwitcher`.
-- `OrgSwitcher` (client component) renders a `<select>`. On change it calls the server action `setActiveOrg(orgId)`, which writes the `active_org_id` cookie, then calls `router.refresh()`.
+- `OrgSwitcher` (client component) renders a `<select>`. On change it calls the server action `setActiveOrg(orgId)`, which writes the `active_org_id` cookie; once the action resolves, the client component calls `router.refresh()`.
 - `router.refresh()` re-renders all server components in the layout with the new cookie in the request — no browser reload, no URL change.
 
 ### Cookie spec
@@ -156,8 +156,8 @@ Returns `{ api_name, object_name, active }[]`.
 
 1. Gets the authenticated user.
 2. Calls `getActiveOrgId(userId)`.
-3. If no active org, renders the existing empty state.
-4. Otherwise runs these counts in parallel via `Promise.all`:
+3. If `getActiveOrgId` returns `null` (no orgs connected at all), renders the existing empty state prompting the user to connect an org.
+4. Otherwise runs these counts in parallel via `Promise.all` and renders the stat grid — counts will be 0 if the org is connected but sync has not yet been run:
 
 | Stat                  | Source |
 |-----------------------|--------|
@@ -205,6 +205,7 @@ All tabs respect the `?q=` search param. Limit 500 rows, ordered by `api_name as
 - `supabase/migrations/0002_extended_metadata.sql`
 - `lib/active-org.ts`
 - `components/layout/org-switcher.tsx`
+- `app/dashboard/actions.ts` — `setActiveOrg(orgId)` server action (writes the cookie)
 
 ### Modified files
 - `components/layout/topbar.tsx` — add `OrgSwitcher`, pass orgs + active org

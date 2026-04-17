@@ -30,18 +30,23 @@ npm run lint              # next lint
 
 Regenerate Supabase types after migrations: `npx supabase gen types typescript --local > types/database.ts`.
 
+There is no test suite yet — do not hunt for a test runner or script.
+
 ## Architecture quick map
 
 - `app/(auth)/**` — login/signup/logout server actions.
-- `app/(dashboard)/**` — sidebar-shelled dashboard: Overview, Orgs, Metadata, Chat, Audit, Settings.
+- `app/dashboard/**` — sidebar-shelled dashboard: Overview, Orgs, Metadata, Chat, Audit, Settings.
 - `app/api/**` — route handlers. Anything touching Salesforce or Claude uses `export const runtime = "nodejs"`.
-- `lib/env.ts` — zod-validated env; call `env()` at boot time.
+- `proxy.ts` — the Next.js middleware entry point; thin re-export of `lib/supabase/middleware.ts` session refresh.
+- `lib/env.ts` — zod-validated env; call `requireEnv()` at boot time.
 - `lib/supabase/{server,client,middleware,admin}.ts` — Supabase client flavors.
   - `admin.ts` uses the service-role key and **bypasses RLS** — use only from server-authenticated paths.
-- `lib/crypto/tokens.ts` — AES-256-GCM for Salesforce tokens at rest.
+- `lib/crypto/tokens.ts` — AES-256-GCM for Salesforce tokens at rest. Use `lib/crypto/bytea.ts` helpers (`byteaForInsert` / `byteaFromSelect`) whenever reading or writing `bytea` columns through PostgREST.
 - `lib/salesforce/*` — three strict submodules: read-only `metadata.ts`, metadata-deploy `metadata-deploy.ts`, SObject DML `records.ts`. `connection.ts` refreshes tokens transparently.
 - `lib/actions/*` — the action registry (`registry.ts`), typed `ActionDefinition`, and the preview/execute pipeline in `executor.ts`. **The AI never calls Salesforce directly — only through actions.**
-- `lib/ai/*` — Anthropic client with prompt caching, intent classifier, tool-definition builder.
+- `lib/ai/*` — Anthropic client with prompt caching (`claude.ts`), intent classifier, tool-definition builder.
+- `lib/audit.ts` — `writeAudit(event)` server-only helper; writes to `audit_logs` via the service-role client.
+- `types/domain.ts` — app-wide enums (`OrgStatus`, `PreviewStatus`, `AuditOutcome`). Generated DB types live in `types/database.ts`.
 - `supabase/migrations/0001_init.sql` — schema + RLS + `handle_new_user` trigger.
 
 ## Hard rules
