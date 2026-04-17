@@ -13,3 +13,10 @@ next-env.d.ts
 
 .DS_Store
 Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+
+# Claude Code local (per-user) settings
+.claude/settings.local.json
