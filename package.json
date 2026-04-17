@@ -10,9 +10,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.71",
     "@anthropic-ai/sdk": "^0.30.1",
     "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.47.10",
+    "ai": "^6.0.168",
     "jsforce": "^3.6.4",
     "next": "^16.2.4",
     "react": "19.0.0",

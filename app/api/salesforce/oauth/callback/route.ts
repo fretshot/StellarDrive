@@ -82,6 +82,7 @@ export async function GET(request: NextRequest) {
         user_id: user.id,
         sf_org_id: orgInfo.sf_org_id,
         org_type: orgInfo.org_type,
+        sf_created_at: orgInfo.sf_created_at,
         instance_url: token.instance_url,
         login_host: parsed.login_host,
         display_name: orgInfo.display_name,
@@ -137,11 +138,13 @@ async function fetchOrgIdentity(instanceUrl: string, accessToken: string) {
     Name: string;
     OrganizationType: string;
     IsSandbox: boolean;
+    CreatedDate: string;
   };
 
   return {
     sf_org_id: org.Id,
     display_name: org.Name,
     org_type: normalizeOrgType(org.OrganizationType, org.IsSandbox),
+    sf_created_at: org.CreatedDate,
   };
 }

@@ -48,6 +48,7 @@ One row per connected Salesforce org owned by one user.
 | `issued_at`         | timestamptz |                                                    |
 | `expires_at`        | timestamptz | access-token expiry                                |
 | `last_sync_at`      | timestamptz | nullable                                           |
+| `sf_created_at`     | timestamptz | nullable — org creation date fetched from `Organization.CreatedDate` |
 | `last_error`        | text        | nullable                                           |
 | `created_at`        | timestamptz |                                                    |
 
@@ -107,13 +108,59 @@ RLS: joined through `salesforce_metadata_objects` to `connected_salesforce_orgs.
 Indexes: `(org_id)`; unique `(org_id, api_name)`.
 RLS: joined through org.
 
+### `salesforce_metadata_triggers`
+
+| column          | type        | notes                                                |
+|-----------------|-------------|------------------------------------------------------|
+| `id`            | uuid PK     |                                                      |
+| `org_id`        | uuid        | `references connected_salesforce_orgs(id) on delete cascade` |
+| `api_name`      | text        | Trigger name                                         |
+| `object_name`   | text        | SObject the trigger fires on                         |
+| `status`        | text        | `Active \| Inactive`                                 |
+| `events`        | text[]      | e.g. `['before insert', 'after update']`             |
+| `last_synced_at`| timestamptz |                                                      |
+
+Indexes: `(org_id)`; unique `(org_id, api_name)`.
+RLS: joined through org.
+
+### `salesforce_metadata_flows`
+
+Stores both Flows (`process_type = 'Flow'`) and Process Builders (`process_type = 'Workflow'`).
+
+| column          | type        | notes                                                |
+|-----------------|-------------|------------------------------------------------------|
+| `id`            | uuid PK     |                                                      |
+| `org_id`        | uuid        | `references connected_salesforce_orgs(id) on delete cascade` |
+| `api_name`      | text        | `FlowDefinition.ApiName`                             |
+| `label`         | text        | Human-readable name                                  |
+| `process_type`  | text        | `Flow \| AutoLaunchedFlow \| Workflow \| ...`        |
+| `status`        | text        | `Active \| Inactive \| Draft \| Obsolete`            |
+| `last_synced_at`| timestamptz |                                                      |
+
+Indexes: `(org_id)`; unique `(org_id, api_name)`.
+RLS: joined through org.
+
+### `salesforce_metadata_workflows`
+
+| column          | type        | notes                                                |
+|-----------------|-------------|------------------------------------------------------|
+| `id`            | uuid PK     |                                                      |
+| `org_id`        | uuid        | `references connected_salesforce_orgs(id) on delete cascade` |
+| `api_name`      | text        | `WorkflowRule.Name`                                  |
+| `object_name`   | text        | SObject the rule belongs to (`TableEnumOrId`)        |
+| `active`        | boolean     |                                                      |
+| `last_synced_at`| timestamptz |                                                      |
+
+Indexes: `(org_id)`; unique `(org_id, api_name)`.
+RLS: joined through org.
+
 ### `metadata_sync_jobs`
 
 | column         | type        | notes                                                |
 |----------------|-------------|------------------------------------------------------|
 | `id`           | uuid PK     |                                                      |
 | `org_id`       | uuid        | `references connected_salesforce_orgs(id) on delete cascade` |
-| `kind`         | text        | `objects | fields | classes | full`                  |
+| `kind`         | text        | `objects | fields | classes | triggers | flows | workflows | full` |
 | `status`       | text        | `pending | running | succeeded | failed`             |
 | `started_at`   | timestamptz | nullable                                             |
 | `finished_at`  | timestamptz | nullable                                             |
