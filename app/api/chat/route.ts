@@ -28,6 +28,28 @@ export async function POST(req: Request) {
   const { messages, activeOrgId } = body;
   let { sessionId } = body;
 
+  // Fix 1 — IDOR: Validate sessionId ownership
+  if (sessionId) {
+    const { data: owned } = await supabase
+      .from("chat_sessions")
+      .select("id")
+      .eq("id", sessionId)
+      .eq("user_id", user.id)
+      .single();
+    if (!owned) return new Response("Session not found", { status: 404 });
+  }
+
+  // Fix 2 — IDOR: Validate activeOrgId ownership
+  if (activeOrgId) {
+    const { data: ownedOrg } = await supabase
+      .from("connected_salesforce_orgs")
+      .select("id")
+      .eq("id", activeOrgId)
+      .eq("user_id", user.id)
+      .single();
+    if (!ownedOrg) return new Response("Org not found", { status: 404 });
+  }
+
   // Extract last user message text from parts array (AI SDK v6 UIMessage shape)
   const lastMsg = messages.at(-1);
   const userText = lastMsg?.parts
@@ -56,7 +78,7 @@ export async function POST(req: Request) {
   }
 
   // Persist user message
-  const { data: userMsgRow } = await supabase
+  const { data: userMsgRow, error: msgError } = await supabase
     .from("chat_messages")
     .insert({
       session_id: sessionId,
@@ -65,6 +87,7 @@ export async function POST(req: Request) {
     })
     .select("id")
     .single();
+  if (msgError) return new Response("Failed to persist message", { status: 500 });
 
   const intent = await classifyIntent(userText);
   const isReadOnly = intent === "informational";
@@ -95,12 +118,15 @@ export async function POST(req: Request) {
         .flatMap((s) => s.toolCalls ?? [])
         .map((tc) => ({ toolName: tc.toolName, args: tc.input }));
 
-      await supabase.from("chat_messages").insert({
+      const { error: assistantMsgError } = await supabase.from("chat_messages").insert({
         session_id: sessionId,
         role: "assistant",
         content: [{ type: "text", text }],
         tool_calls: toolCallsForDb.length > 0 ? toolCallsForDb : null,
       });
+      if (assistantMsgError) {
+        console.error("[chat/route] failed to persist assistant message:", assistantMsgError.message);
+      }
     },
   });
 

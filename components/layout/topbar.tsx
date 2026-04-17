@@ -12,7 +12,7 @@ export async function Topbar() {
 
   const { data: orgs } = await supabase
     .from("connected_salesforce_orgs")
-    .select("id, alias, display_name")
+    .select("id, alias, display_name, instance_url")
     .order("created_at", { ascending: true });
 
   const orgList = orgs ?? [];

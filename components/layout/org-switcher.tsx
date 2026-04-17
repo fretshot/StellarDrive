@@ -6,6 +6,7 @@ interface Org {
   id: string;
   alias: string | null;
   display_name: string | null;
+  instance_url: string | null;
 }
 
 interface OrgSwitcherProps {
@@ -33,7 +34,7 @@ export function OrgSwitcher({ orgs, activeOrgId }: OrgSwitcherProps) {
     >
       {orgs.map((org) => (
         <option key={org.id} value={org.id}>
-          {org.alias || org.display_name || org.id}
+          {org.instance_url || org.alias || org.display_name || org.id}
         </option>
       ))}
     </select>
