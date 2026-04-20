@@ -36,47 +36,53 @@ export function MessageList({ messages, isLoading, error }: MessageListProps) {
 
   if (messages.length === 0 && !isLoading) {
     return (
-      <div className="flex flex-1 items-center justify-center text-sm text-neutral-500">
+      <div className="flex flex-1 items-center justify-center px-6 text-sm text-neutral-500">
         Ask anything about your connected org.
       </div>
     );
   }
 
   return (
-    <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
-      {messages.map((msg) => (
-        <div key={msg.id}>
-          {msg.role === "user" && (
-            <div className="flex justify-end">
-              <div className="max-w-[75%] rounded-lg bg-neutral-900 px-3 py-2 text-sm text-white dark:bg-neutral-100 dark:text-neutral-900">
-                <UserText parts={msg.parts} />
+    <div className="flex min-h-0 flex-1 overflow-hidden">
+      <div className="flex min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-8 py-8">
+          {messages.map((msg) => (
+            <div key={msg.id}>
+              {msg.role === "user" && (
+                <div className="flex justify-end">
+                  <div className="max-w-[72%] rounded-xl bg-neutral-900 px-4 py-3 text-sm text-white shadow-sm dark:bg-neutral-100 dark:text-neutral-900">
+                    <UserText parts={msg.parts} />
+                  </div>
+                </div>
+              )}
+
+              {msg.role === "assistant" && (
+                <div className="min-w-0">
+                  <ToolRows parts={msg.parts} />
+                  <AssistantTextRows parts={msg.parts} />
+                </div>
+              )}
+            </div>
+          ))}
+
+          {isLoading && messages.at(-1)?.role === "user" && (
+            <div className="flex items-center gap-3 px-1 text-sm text-neutral-500">
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-neutral-200 dark:bg-neutral-800">
+                <span className="animate-spin inline-block text-xs">⟳</span>
               </div>
+              <span>Thinking through your org and available tools…</span>
             </div>
           )}
 
-          {msg.role === "assistant" && (
-            <div className="flex flex-col gap-2">
-              <ToolRows parts={msg.parts} />
-              <AssistantTextRows parts={msg.parts} />
+          {error && (
+            <div className="w-full rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
+              Response interrupted — try again.
             </div>
           )}
-        </div>
-      ))}
 
-      {isLoading && messages.at(-1)?.role === "user" && (
-        <div className="flex items-center gap-2 text-xs text-neutral-500">
-          <span className="animate-spin inline-block">⟳</span>
-          <span>Thinking…</span>
+          <div ref={bottomRef} />
         </div>
-      )}
-
-      {error && (
-        <div className="mx-[-1rem] rounded-none w-full border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
-          Response interrupted — try again.
-        </div>
-      )}
-
-      <div ref={bottomRef} />
+      </div>
     </div>
   );
 }
@@ -155,7 +161,7 @@ function ToolRows({ parts }: { parts: Part[] }) {
       badgeRows.push(
         <div
           key={toolCallId}
-          className="flex items-center gap-1.5 text-xs text-neutral-500"
+          className="inline-flex w-fit items-center gap-1.5 rounded-full bg-neutral-100 px-2.5 py-1 text-xs text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300"
         >
           <span className="text-green-600 dark:text-green-400">✓</span>
           <span>
@@ -172,7 +178,7 @@ function ToolRows({ parts }: { parts: Part[] }) {
       badgeRows.push(
         <div
           key={toolCallId}
-          className="flex items-center gap-1.5 text-xs text-red-600 dark:text-red-400"
+          className="inline-flex w-fit items-center gap-1.5 rounded-full bg-red-50 px-2.5 py-1 text-xs text-red-600 dark:bg-red-950/40 dark:text-red-300"
         >
           <span>✗</span>
           <span>
@@ -187,7 +193,7 @@ function ToolRows({ parts }: { parts: Part[] }) {
       badgeRows.push(
         <div
           key={toolCallId}
-          className="flex items-center gap-1.5 text-xs text-neutral-500"
+          className="inline-flex w-fit items-center gap-1.5 rounded-full bg-neutral-100 px-2.5 py-1 text-xs text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400"
         >
           <span>—</span>
           <span>{label}: cancelled</span>
@@ -200,7 +206,7 @@ function ToolRows({ parts }: { parts: Part[] }) {
     badgeRows.push(
       <div
         key={toolCallId}
-        className="flex items-center gap-1.5 text-xs text-neutral-500"
+        className="inline-flex w-fit items-center gap-1.5 rounded-full bg-neutral-100 px-2.5 py-1 text-xs text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400"
       >
         <span className="animate-spin inline-block">⟳</span>
         <span>{label}…</span>
@@ -211,7 +217,7 @@ function ToolRows({ parts }: { parts: Part[] }) {
   const batchMessageId = previewOutputs[0]?.messageId ?? "";
 
   return (
-    <div className="flex flex-col gap-1">
+    <div className="mb-3 flex flex-col gap-2">
       {badgeRows}
       {previewOutputs.length > 0 && (
         <BatchPreviewGroup
@@ -240,7 +246,7 @@ function AssistantTextRows({ parts }: { parts: Part[] }) {
   if (textParts.length === 0) return null;
 
   return (
-    <div className="max-w-[85%] text-sm">
+    <div className="text-sm leading-6 text-neutral-800 dark:text-neutral-200">
       {textParts.map((p, i) => (
         <AssistantText key={i} text={p.text} />
       ))}
