@@ -281,50 +281,65 @@ function AssistantText({ text }: { text: string }) {
       continue;
     }
 
-    // Markdown table (lines starting with |, second line is separator |---|)
-    if (line.trimStart().startsWith("|") && lines[i + 1]?.trim().match(/^\|[-| :]+\|$/)) {
-      const tableLines: string[] = [];
-      while (i < lines.length && lines[i].trimStart().startsWith("|")) {
-        tableLines.push(lines[i]);
-        i++;
+    // Markdown table — collect | rows, skipping blank lines between them
+    if (line.trimStart().startsWith("|")) {
+      const rawTableLines: string[] = [];
+      let j = i;
+      while (j < lines.length) {
+        const l = lines[j].trim();
+        if (l.startsWith("|")) {
+          rawTableLines.push(lines[j]);
+          j++;
+        } else if (l === "" && lines[j + 1]?.trim().startsWith("|")) {
+          j++; // blank line between rows — skip
+        } else {
+          break;
+        }
       }
-      const parseRow = (row: string) =>
-        row.split("|").slice(1, -1).map((cell) => cell.trim());
-      const [headerRow, , ...dataRows] = tableLines; // skip separator row
-      const headers = parseRow(headerRow);
-      nodes.push(
-        <div key={nodes.length} className="my-2 overflow-x-auto">
-          <table className="w-full border-collapse text-xs">
-            <thead>
-              <tr className="border-b border-neutral-300 dark:border-neutral-600">
-                {headers.map((h, j) => (
-                  <th
-                    key={j}
-                    className="px-3 py-1.5 text-left font-semibold text-neutral-700 dark:text-neutral-300"
-                  >
-                    <InlineMarkdown text={h} />
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {dataRows.map((row, ri) => (
-                <tr
-                  key={ri}
-                  className="border-b border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/40"
-                >
-                  {parseRow(row).map((cell, ci) => (
-                    <td key={ci} className="px-3 py-1.5 text-neutral-800 dark:text-neutral-200">
-                      <InlineMarkdown text={cell} />
-                    </td>
+      const isSeparator = (r: string) => /^\|[-| :]+\|$/.test(r.trim());
+      const hasSeparator = rawTableLines.some(isSeparator);
+      if (hasSeparator && rawTableLines.length >= 2) {
+        i = j;
+        const parseRow = (row: string) =>
+          row.split("|").slice(1, -1).map((cell) => cell.trim());
+        const contentRows = rawTableLines.filter((r) => !isSeparator(r));
+        const [headerRow, ...dataRows] = contentRows;
+        const headers = parseRow(headerRow);
+        nodes.push(
+          <div key={nodes.length} className="my-2 overflow-x-auto">
+            <table className="w-full border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-neutral-300 dark:border-neutral-600">
+                  {headers.map((h, ci) => (
+                    <th
+                      key={ci}
+                      className="px-3 py-1.5 text-left font-semibold text-neutral-700 dark:text-neutral-300"
+                    >
+                      <InlineMarkdown text={h} />
+                    </th>
                   ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>,
-      );
-      continue;
+              </thead>
+              <tbody>
+                {dataRows.map((row, ri) => (
+                  <tr
+                    key={ri}
+                    className="border-b border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/40"
+                  >
+                    {parseRow(row).map((cell, ci) => (
+                      <td key={ci} className="px-3 py-1.5 text-neutral-800 dark:text-neutral-200">
+                        <InlineMarkdown text={cell} />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>,
+        );
+        continue;
+      }
+      // Not a table — fall through to paragraph rendering
     }
 
     // Bullet list item
