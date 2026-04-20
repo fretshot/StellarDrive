@@ -67,6 +67,7 @@ export function BatchPreviewGroup({
   const [loading, setLoading] = useState(false);
   const [resolved, setResolved] = useState(false);
   const [confirmSteps, setConfirmSteps] = useState<StepResult[] | null>(null);
+  const [, setExpiredTick] = useState(0);
 
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -75,6 +76,21 @@ export function BatchPreviewGroup({
   }, []);
 
   const sorted = [...previews].sort((a, b) => a.batchIndex - b.batchIndex);
+
+  // Schedule a re-render at the earliest preview expiry so the expired state
+  // appears automatically without requiring user interaction.
+  useEffect(() => {
+    if (resolved) return;
+    const deadlines = sorted
+      .map((p) => p.expiresAt)
+      .filter((t): t is number => t !== undefined);
+    if (deadlines.length === 0) return;
+    const nearest = Math.min(...deadlines);
+    const ms = nearest - Date.now();
+    if (ms <= 0) return;
+    const id = setTimeout(() => setExpiredTick((n) => n + 1), ms);
+    return () => clearTimeout(id);
+  }, [resolved, sorted]);
 
   const expired =
     !resolved &&
