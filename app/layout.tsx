@@ -10,11 +10,11 @@ const themeScript = `(function(){try{var s=localStorage.getItem('theme');var d=w
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body className="min-h-screen">
+    <html lang="en" suppressHydrationWarning>
+      <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
-        {children}
-      </body>
+      </head>
+      <body className="min-h-screen">{children}</body>
     </html>
   );
 }
