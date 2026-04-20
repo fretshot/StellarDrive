@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { ActionPreviewCard } from "@/components/chat/action-preview-card";
 import type { ActionPreview } from "@/lib/actions/types";
 
@@ -48,7 +48,6 @@ function StepStatusLine({ index, step }: { index: number; step: StepResult }) {
     );
   }
 
-  // skipped
   return (
     <div className="flex items-start gap-1.5 text-xs text-neutral-500">
       <span className="shrink-0">—</span>
@@ -66,49 +65,57 @@ export function BatchPreviewGroup({
 }: BatchPreviewGroupProps) {
   const [loading, setLoading] = useState(false);
   const [resolved, setResolved] = useState(false);
-  const [stepResults, setStepResults] = useState<StepResult[] | null>(null);
+  const [confirmSteps, setConfirmSteps] = useState<StepResult[] | null>(null);
 
-  // Sort previews ascending by batchIndex for stable render order.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
   const sorted = [...previews].sort((a, b) => a.batchIndex - b.batchIndex);
 
   async function handleConfirmAll() {
     if (loading || resolved) return;
     setLoading(true);
+    const controller = new AbortController();
     try {
       const res = await fetch("/api/actions/execute-batch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messageId }),
+        signal: controller.signal,
       });
 
-      let steps: StepResult[] = [];
+      let steps: StepResult[];
       if (res.ok) {
         const data = (await res.json()) as { steps?: StepResult[] };
         steps = data.steps ?? [];
       } else {
-        // Surface a generic failure for each step so the UI is not silent.
         steps = sorted.map((p) => ({
           previewId: p.previewId,
-          status: "failed",
+          status: "failed" as const,
           error: `HTTP ${res.status}`,
         }));
       }
 
-      setStepResults(steps);
+      if (!mountedRef.current) return;
+      setConfirmSteps(steps);
       setResolved(true);
       onResolved("executed", steps);
     } catch (err) {
+      if (!mountedRef.current) return;
       const message = err instanceof Error ? err.message : "Unknown error";
       const steps: StepResult[] = sorted.map((p) => ({
         previewId: p.previewId,
-        status: "failed",
+        status: "failed" as const,
         error: message,
       }));
-      setStepResults(steps);
+      setConfirmSteps(steps);
       setResolved(true);
-      onResolved("executed", steps);
+      onResolved("rejected");
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   }
 
@@ -117,22 +124,36 @@ export function BatchPreviewGroup({
     setLoading(true);
     try {
       for (const item of sorted) {
-        await fetch("/api/actions/reject", {
+        const res = await fetch("/api/actions/reject", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ previewId: item.previewId }),
         });
+        if (!res.ok) {
+          throw new Error(`Failed to reject preview ${item.previewId}: HTTP ${res.status}`);
+        }
       }
+      if (!mountedRef.current) return;
+      setResolved(true);
+      onResolved("rejected");
+    } catch (err) {
+      if (!mountedRef.current) return;
+      const message = err instanceof Error ? err.message : "Unknown error";
+      const steps: StepResult[] = sorted.map((p) => ({
+        previewId: p.previewId,
+        status: "failed" as const,
+        error: message,
+      }));
+      setConfirmSteps(steps);
       setResolved(true);
       onResolved("rejected");
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   }
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Preview cards */}
       {sorted.map((item) => (
         <ActionPreviewCard
           key={item.previewId}
@@ -141,16 +162,15 @@ export function BatchPreviewGroup({
         />
       ))}
 
-      {/* Per-step status lines (shown after confirmation) */}
-      {stepResults && stepResults.length > 0 && (
+      {/* Per-step status lines — shown only after confirm */}
+      {resolved && confirmSteps && confirmSteps.length > 0 && (
         <div className="flex flex-col gap-1 rounded border border-neutral-200 bg-neutral-50 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900/40">
-          {stepResults.map((step, i) => (
+          {confirmSteps.map((step, i) => (
             <StepStatusLine key={step.previewId} index={i} step={step} />
           ))}
         </div>
       )}
 
-      {/* Action buttons — hidden once resolved */}
       {!resolved && (
         <div className="flex items-center gap-2">
           <button
