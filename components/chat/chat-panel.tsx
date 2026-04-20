@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useSyncExternalStore, useCallback } from "react";
+import { deleteSession } from "@/app/dashboard/chat/actions";
 import { useRouter } from "next/navigation";
 import {
   AbstractChat,
@@ -200,6 +201,12 @@ export function ChatPanel({
   const { messages, status, error } = useReactChat(chat);
   const isLoading = status === "submitted" || status === "streaming";
 
+  async function handleDelete() {
+    if (!sessionId) return;
+    await deleteSession(sessionId);
+    handleNew();
+  }
+
   function handleNew() {
     setSessionId(null);
     sessionIdRef.current = null;
@@ -230,7 +237,7 @@ export function ChatPanel({
       />
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <ChatHeader />
+        <ChatHeader sessionId={sessionId} onReset={handleNew} onDelete={handleDelete} />
         {sessionId === null && messages.length === 0 ? (
           <div className="flex flex-1 items-center justify-center p-8">
             <ChatWelcomeState
@@ -257,16 +264,69 @@ export function ChatPanel({
   );
 }
 
-function ChatHeader() {
+function ChatHeader({
+  sessionId,
+  onReset,
+  onDelete,
+}: {
+  sessionId: string | null;
+  onReset: () => void;
+  onDelete: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    if (open) document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [open]);
+
   return (
     <div className="shrink-0 border-b border-neutral-200 bg-white/90 px-6 py-3 backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/90">
-      <div className="mx-auto w-full max-w-4xl">
-        <h1 className="text-sm font-semibold text-neutral-950 dark:text-neutral-50">
-          StellarDrive Assistant
-        </h1>
-        <p className="text-xs text-neutral-500">
-          Read metadata, inspect org structure, and prepare create-only action previews.
-        </p>
+      <div className="mx-auto flex w-full max-w-4xl items-start justify-between">
+        <div>
+          <h1 className="text-sm font-semibold text-neutral-950 dark:text-neutral-50">
+            StellarDrive Assistant
+          </h1>
+          <p className="text-xs text-neutral-500">
+            Read metadata, inspect org structure, and prepare create-only action previews.
+          </p>
+        </div>
+        <div className="relative" ref={menuRef}>
+          <button
+            onClick={() => setOpen((v) => !v)}
+            aria-label="More options"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+              <circle cx="3" cy="8" r="1.25" />
+              <circle cx="8" cy="8" r="1.25" />
+              <circle cx="13" cy="8" r="1.25" />
+            </svg>
+          </button>
+          {open && (
+            <div className="absolute right-0 top-8 z-20 w-44 rounded-xl border border-neutral-200 bg-white py-1 shadow-lg dark:border-neutral-800 dark:bg-neutral-900">
+              <button
+                onClick={() => { setOpen(false); onReset(); }}
+                className="w-full px-3 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-800"
+              >
+                Reset chat
+              </button>
+              <button
+                onClick={() => { setOpen(false); onDelete(); }}
+                disabled={!sessionId}
+                className="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-red-400 dark:hover:bg-red-950/30"
+              >
+                Delete conversation
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
