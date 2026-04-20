@@ -194,13 +194,14 @@ export async function executeBatch(
 ): Promise<{ steps: BatchStepResult[] }> {
   const admin = createSupabaseAdminClient();
 
-  const { data: rows } = await admin
+  const { data: rows, error: rowsError } = await admin
     .from("action_previews")
     .select("id, user_id, org_id, action_type, payload, status, created_at")
     .eq("message_id", messageId)
     .eq("status", "pending")
     .order("batch_index", { ascending: true });
 
+  if (rowsError) throw new ActionError("internal", "load_previews_failed", rowsError.message);
   if (!rows || rows.length === 0) return { steps: [] };
 
   const results: unknown[] = [];
@@ -215,6 +216,7 @@ export async function executeBatch(
     }
 
     if (row.user_id !== ctx.userId) {
+      await admin.from("action_previews").update({ status: "failed" }).eq("id", row.id);
       steps.push({ previewId: row.id, status: "failed", error: "Ownership check failed" });
       failed = true;
       continue;
@@ -229,6 +231,7 @@ export async function executeBatch(
 
     const action = getAction(row.action_type);
     if (!action) {
+      await admin.from("action_previews").update({ status: "failed" }).eq("id", row.id);
       steps.push({ previewId: row.id, status: "failed", error: `Unknown action: ${row.action_type}` });
       failed = true;
       continue;
@@ -237,6 +240,7 @@ export async function executeBatch(
     const resolvedPayload = resolveRefs(row.payload, results);
     const parsedInput = action.input.safeParse(resolvedPayload);
     if (!parsedInput.success) {
+      await admin.from("action_previews").update({ status: "failed" }).eq("id", row.id);
       steps.push({ previewId: row.id, status: "failed", error: "Input invalid after $ref resolution" });
       failed = true;
       continue;
