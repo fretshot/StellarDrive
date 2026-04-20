@@ -203,7 +203,9 @@ export function ChatPanel({
 
   async function handleDelete() {
     if (!sessionId) return;
-    await deleteSession(sessionId);
+    const deletedId = sessionId;
+    await deleteSession(deletedId);
+    setSessions((prev) => prev.filter((s) => s.id !== deletedId));
     handleNew();
   }
 
