@@ -3,6 +3,7 @@ import { tool } from "ai";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { ACTIONS } from "@/lib/actions/registry";
 import type { ActionContext } from "@/lib/actions/types";
+import { buildPreview } from "@/lib/actions/executor";
 
 /**
  * Legacy format for direct Anthropic SDK usage (kept for reference).
@@ -19,8 +20,14 @@ export function buildToolDefinitions() {
  * AI SDK format: returns a tools record for use with streamText.
  * readOnly=true filters to read-only tools only.
  * ctx is bound into each tool's execute closure.
+ *
+ * Mutating tools: execute closure calls buildPreview() and returns
+ * { previewId, batchIndex, messageId, preview } — NOT a Salesforce result.
+ * The user must confirm via POST /api/actions/execute-batch before anything executes.
  */
 export function buildAiSdkTools(readOnly: boolean, ctx: ActionContext) {
+  let batchIndex = 0;
+
   return Object.fromEntries(
     ACTIONS
       .filter((a) => !readOnly || a.readOnly)
@@ -30,8 +37,18 @@ export function buildAiSdkTools(readOnly: boolean, ctx: ActionContext) {
           description: action.description,
           inputSchema: action.input,
           execute: async (input: unknown) => {
+            if (action.readOnly) {
+              try {
+                return await action.execute(input, ctx);
+              } catch (err) {
+                return { error: err instanceof Error ? err.message : String(err) };
+              }
+            }
+            // Mutating: persist preview, return preview metadata to Claude
             try {
-              return await action.execute(input, ctx);
+              const index = batchIndex++;
+              const { previewId, preview } = await buildPreview(action, input as any, ctx, index);
+              return { previewId, batchIndex: index, messageId: ctx.messageId, preview };
             } catch (err) {
               return { error: err instanceof Error ? err.message : String(err) };
             }

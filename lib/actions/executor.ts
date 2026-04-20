@@ -14,6 +14,7 @@ export async function buildPreview<I>(
   action: ActionDefinition<I, unknown, unknown>,
   input: I,
   ctx: ActionContext,
+  batchIndex = 0,
 ): Promise<{ previewId: string; preview: unknown }> {
   if (action.readOnly) {
     throw new ActionError("internal", "preview_on_read_only", "Read-only actions do not produce previews");
@@ -38,6 +39,7 @@ export async function buildPreview<I>(
       preview,
       validation,
       status: "pending",
+      batch_index: batchIndex,
     })
     .select("id")
     .single();
@@ -110,18 +112,21 @@ export async function executePreview(
     .update({ status: "confirmed", confirmed_at: new Date().toISOString() })
     .eq("id", row.id);
 
-  const { data: exec } = await admin
+  const { data: exec, error: execInsertError } = await admin
     .from("action_executions")
     .insert({ preview_id: row.id, status: "running" })
     .select("id")
     .single();
+  if (execInsertError || !exec) {
+    throw new ActionError("internal", "exec_insert_failed", execInsertError?.message ?? "no row");
+  }
 
   try {
     const result = await action.execute(parsedInput.data, ctx);
     await admin
       .from("action_executions")
       .update({ status: "succeeded", result, finished_at: new Date().toISOString() })
-      .eq("id", exec!.id);
+      .eq("id", exec.id);
     await admin.from("action_previews").update({ status: "executed" }).eq("id", row.id);
     await writeAudit({
       user_id: ctx.userId,
@@ -137,7 +142,7 @@ export async function executePreview(
     await admin
       .from("action_executions")
       .update({ status: "failed", error: message, finished_at: new Date().toISOString() })
-      .eq("id", exec!.id);
+      .eq("id", exec.id);
     await admin.from("action_previews").update({ status: "failed" }).eq("id", row.id);
     await writeAudit({
       user_id: ctx.userId,
@@ -149,4 +154,176 @@ export async function executePreview(
     });
     throw err;
   }
+}
+
+/**
+ * Recursively replaces $ref:step[N].fieldPath tokens with values from
+ * prior step results. Runs server-side at execute time only.
+ */
+export function resolveRefs(payload: unknown, results: unknown[]): unknown {
+  if (typeof payload === "string") {
+    const m = payload.match(/^\$ref:step\[(\d+)\]\.(.+)$/);
+    if (m) {
+      const stepResult = results[Number(m[1])];
+      return m[2].split(".").reduce((o: unknown, k) => {
+        if (o !== null && typeof o === "object") return (o as Record<string, unknown>)[k];
+        return undefined;
+      }, stepResult);
+    }
+  }
+  if (Array.isArray(payload)) return payload.map((v) => resolveRefs(v, results));
+  if (payload !== null && typeof payload === "object") {
+    return Object.fromEntries(
+      Object.entries(payload as Record<string, unknown>).map(([k, v]) => [k, resolveRefs(v, results)]),
+    );
+  }
+  return payload;
+}
+
+export interface BatchStepResult {
+  previewId: string;
+  status: "executed" | "failed" | "skipped";
+  result?: unknown;
+  error?: string;
+}
+
+/**
+ * Execute all pending previews for a message in batch_index order.
+ * Resolves $ref tokens using prior step results. Stops on first failure.
+ */
+export async function executeBatch(
+  messageId: string,
+  ctx: ActionContext,
+): Promise<{ steps: BatchStepResult[] }> {
+  const admin = createSupabaseAdminClient();
+
+  const { data: rows, error: rowsError } = await admin
+    .from("action_previews")
+    .select("id, user_id, org_id, action_type, payload, status, created_at")
+    .eq("message_id", messageId)
+    .eq("user_id", ctx.userId)
+    .eq("status", "pending")
+    .order("batch_index", { ascending: true });
+
+  if (rowsError) throw new ActionError("internal", "load_previews_failed", rowsError.message);
+  if (!rows || rows.length === 0) return { steps: [] };
+
+  const results: unknown[] = [];
+  const steps: BatchStepResult[] = [];
+  let failed = false;
+
+  for (const row of rows) {
+    if (failed) {
+      await admin.from("action_previews").update({ status: "failed" }).eq("id", row.id);
+      steps.push({ previewId: row.id, status: "skipped" });
+      continue;
+    }
+
+    if (row.user_id !== ctx.userId) {
+      await admin.from("action_previews").update({ status: "failed" }).eq("id", row.id);
+      steps.push({ previewId: row.id, status: "failed", error: "Ownership check failed" });
+      failed = true;
+      continue;
+    }
+
+    if (Date.now() - new Date(row.created_at).getTime() > PREVIEW_TTL_MS) {
+      await admin.from("action_previews").update({ status: "expired" }).eq("id", row.id);
+      steps.push({ previewId: row.id, status: "failed", error: "Preview expired" });
+      failed = true;
+      continue;
+    }
+
+    const action = getAction(row.action_type);
+    if (!action) {
+      await admin.from("action_previews").update({ status: "failed" }).eq("id", row.id);
+      steps.push({ previewId: row.id, status: "failed", error: `Unknown action: ${row.action_type}` });
+      failed = true;
+      continue;
+    }
+
+    const resolvedPayload = resolveRefs(row.payload, results);
+    const parsedInput = action.input.safeParse(resolvedPayload);
+    if (!parsedInput.success) {
+      await admin.from("action_previews").update({ status: "failed" }).eq("id", row.id);
+      steps.push({ previewId: row.id, status: "failed", error: "Input invalid after $ref resolution" });
+      failed = true;
+      continue;
+    }
+
+    const execCtx: ActionContext = { ...ctx, orgId: row.org_id };
+
+    if (action.validate) {
+      const v = await action.validate(parsedInput.data, execCtx);
+      if (!v.ok) {
+        await admin.from("action_previews").update({ status: "failed" }).eq("id", row.id);
+        await writeAudit({
+          user_id: ctx.userId,
+          org_id: row.org_id,
+          action_type: "action.validation_failed",
+          entity_type: action.name,
+          outcome: "failure",
+          metadata: { preview_id: row.id, issues: v.issues },
+        });
+        steps.push({ previewId: row.id, status: "failed", error: v.issues.map((i) => i.message).join(", ") });
+        failed = true;
+        continue;
+      }
+    }
+
+    await admin
+      .from("action_previews")
+      .update({ status: "confirmed", confirmed_at: new Date().toISOString() })
+      .eq("id", row.id);
+
+    const { data: exec, error: execInsertError } = await admin
+      .from("action_executions")
+      .insert({ preview_id: row.id, status: "running" })
+      .select("id")
+      .single();
+    if (execInsertError || !exec) {
+      await admin.from("action_previews").update({ status: "failed" }).eq("id", row.id);
+      steps.push({ previewId: row.id, status: "failed", error: "Failed to create execution record" });
+      failed = true;
+      continue;
+    }
+
+    try {
+      const result = await action.execute(parsedInput.data, execCtx);
+      results.push(result);
+      await admin
+        .from("action_executions")
+        .update({ status: "succeeded", result, finished_at: new Date().toISOString() })
+        .eq("id", exec.id);
+      await admin.from("action_previews").update({ status: "executed" }).eq("id", row.id);
+      await writeAudit({
+        user_id: ctx.userId,
+        org_id: row.org_id,
+        action_type: "action.executed",
+        entity_type: action.name,
+        outcome: "success",
+        metadata: { preview_id: row.id, result },
+      });
+      steps.push({ previewId: row.id, status: "executed", result });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      results.push({ error: message });
+      await admin
+        .from("action_executions")
+        .update({ status: "failed", error: message, finished_at: new Date().toISOString() })
+        .eq("id", exec.id);
+      await admin.from("action_previews").update({ status: "failed" }).eq("id", row.id);
+      await writeAudit({
+        user_id: ctx.userId,
+        org_id: row.org_id,
+        action_type: "action.executed",
+        entity_type: action.name,
+        outcome: "failure",
+        metadata: { preview_id: row.id, error: message },
+      });
+      steps.push({ previewId: row.id, status: "failed", error: message });
+      failed = true;
+    }
+  }
+
+  return { steps };
 }

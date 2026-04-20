@@ -213,6 +213,7 @@ RLS: joined through `chat_sessions`.
 | `status`       | text        | `pending | confirmed | rejected | expired | executed | failed` |
 | `created_at`   | timestamptz |                                                      |
 | `confirmed_at` | timestamptz | nullable                                             |
+| `batch_index`  | integer     | Order of this preview within its batch (previews sharing the same `message_id`); default 0 |
 
 Indexes: `(user_id, created_at desc)`, `(session_id)`.
 RLS: `user_id = auth.uid()`.

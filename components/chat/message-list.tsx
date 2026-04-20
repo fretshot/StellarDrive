@@ -3,6 +3,8 @@
 import { useEffect, useRef } from "react";
 import type { UIMessage } from "ai";
 import { getToolName } from "ai";
+import { BatchPreviewGroup } from "@/components/chat/batch-preview-group";
+import type { ActionPreview } from "@/lib/actions/types";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -92,6 +94,33 @@ function UserText({ parts }: { parts: Part[] }) {
   return <>{text}</>;
 }
 
+// Shape of a mutating preview output returned by a tool execute closure.
+interface PreviewOutput {
+  previewId: string;
+  batchIndex: number;
+  messageId: string;
+  preview: ActionPreview;
+}
+
+function isPreviewOutput(output: unknown): output is PreviewOutput {
+  if (output === null || typeof output !== "object") return false;
+  const o = output as Record<string, unknown>;
+  if (
+    typeof o.previewId !== "string" ||
+    typeof o.batchIndex !== "number" ||
+    typeof o.messageId !== "string" ||
+    o.preview === null ||
+    typeof o.preview !== "object"
+  ) return false;
+  const p = o.preview as Record<string, unknown>;
+  return (
+    typeof p.actionType === "string" &&
+    typeof p.summary === "string" &&
+    Array.isArray(p.targets) &&
+    Array.isArray(p.risks)
+  );
+}
+
 /** Renders tool-invocation rows from a set of assistant message parts. */
 function ToolRows({ parts }: { parts: Part[] }) {
   const toolParts = parts.filter(
@@ -101,71 +130,101 @@ function ToolRows({ parts }: { parts: Part[] }) {
 
   if (toolParts.length === 0) return null;
 
+  // Separate tool parts into read-only badge rows and mutating preview outputs.
+  const previewOutputs: PreviewOutput[] = [];
+  const badgeRows: React.ReactNode[] = [];
+
+  for (const part of toolParts) {
+    const toolCallId = (part as { toolCallId: string }).toolCallId;
+    const rawName = getToolName(part);
+    const label = formatToolName(rawName);
+    const state = (part as { state: string }).state;
+
+    if (state === "output-available") {
+      const output = (part as { output: unknown }).output;
+
+      // Mutating preview — collect for BatchPreviewGroup, skip badge row.
+      if (isPreviewOutput(output)) {
+        previewOutputs.push(output);
+        continue;
+      }
+
+      // Read-only output — render existing badge.
+      const count = countResults(output);
+      badgeRows.push(
+        <div
+          key={toolCallId}
+          className="flex items-center gap-1.5 text-xs text-neutral-500"
+        >
+          <span className="text-green-600 dark:text-green-400">✓</span>
+          <span>
+            {label}
+            {count !== null ? ` (${count} results)` : ""}
+          </span>
+        </div>,
+      );
+      continue;
+    }
+
+    if (state === "output-error") {
+      const errorText = (part as { errorText: string }).errorText;
+      badgeRows.push(
+        <div
+          key={toolCallId}
+          className="flex items-center gap-1.5 text-xs text-red-600 dark:text-red-400"
+        >
+          <span>✗</span>
+          <span>
+            {label}: {errorText}
+          </span>
+        </div>,
+      );
+      continue;
+    }
+
+    if (state === "output-denied") {
+      badgeRows.push(
+        <div
+          key={toolCallId}
+          className="flex items-center gap-1.5 text-xs text-neutral-500"
+        >
+          <span>—</span>
+          <span>{label}: cancelled</span>
+        </div>,
+      );
+      continue;
+    }
+
+    // input-streaming, input-available, approval-requested, approval-responded → in-progress
+    badgeRows.push(
+      <div
+        key={toolCallId}
+        className="flex items-center gap-1.5 text-xs text-neutral-500"
+      >
+        <span className="animate-spin inline-block">⟳</span>
+        <span>{label}…</span>
+      </div>,
+    );
+  }
+
+  const batchMessageId = previewOutputs[0]?.messageId ?? "";
+
   return (
     <div className="flex flex-col gap-1">
-      {toolParts.map((part) => {
-        // Both ToolUIPart and DynamicToolUIPart share toolCallId, state, and toolName
-        // (ToolUIPart encodes the name in `type` as `tool-<name>`)
-        const toolCallId = (part as { toolCallId: string }).toolCallId;
-        const rawName = getToolName(part);
-        const label = formatToolName(rawName);
-        const state = (part as { state: string }).state;
-
-        if (state === "output-available") {
-          const output = (part as { output: unknown }).output;
-          const count = countResults(output);
-          return (
-            <div
-              key={toolCallId}
-              className="flex items-center gap-1.5 text-xs text-neutral-500"
-            >
-              <span className="text-green-600 dark:text-green-400">✓</span>
-              <span>
-                {label}
-                {count !== null ? ` (${count} results)` : ""}
-              </span>
-            </div>
-          );
-        }
-
-        if (state === "output-error") {
-          const errorText = (part as { errorText: string }).errorText;
-          return (
-            <div
-              key={toolCallId}
-              className="flex items-center gap-1.5 text-xs text-red-600 dark:text-red-400"
-            >
-              <span>✗</span>
-              <span>
-                {label}: {errorText}
-              </span>
-            </div>
-          );
-        }
-
-        if (state === "output-denied") {
-          return (
-            <div
-              key={toolCallId}
-              className="flex items-center gap-1.5 text-xs text-neutral-500"
-            >
-              <span>—</span>
-              <span>{label}: cancelled</span>
-            </div>
-          );
-        }
-
-        // input-streaming, input-available, approval-requested, approval-responded → in-progress
-        return (
-          <div
-            key={toolCallId}
-            className="flex items-center gap-1.5 text-xs text-neutral-500"
-          >
-            <span className="animate-spin inline-block">⟳</span>
-            <span>{label}…</span>
-          </div>
-        );
-      })}
+      {badgeRows}
+      {previewOutputs.length > 0 && (
+        <BatchPreviewGroup
+          previews={previewOutputs.map((o) => ({
+            previewId: o.previewId,
+            batchIndex: o.batchIndex,
+            preview: o.preview,
+          }))}
+          messageId={batchMessageId}
+          onResolved={() => {
+            // No-op for Phase 1: the next assistant message turn will surface results.
+          }}
+        />
+      )}
     </div>
   );
 }
