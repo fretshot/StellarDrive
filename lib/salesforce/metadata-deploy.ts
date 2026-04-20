@@ -79,7 +79,7 @@ export async function createPermissionSet(conn: Connection, input: CreatePermiss
 
   // Metadata API does not return the record ID — query it by Name
   const soql = await conn.query<{ Id: string }>(
-    `SELECT Id FROM PermissionSet WHERE Name = '${input.apiName.replace(/'/g, "\\'")}' LIMIT 1`,
+    `SELECT Id FROM PermissionSet WHERE Name = '${input.apiName.replace(/'/g, "''")}' LIMIT 1`,
   );
   const id = soql.records[0]?.Id;
   if (!id) throw new Error("PermissionSet created but could not retrieve its Salesforce ID");
