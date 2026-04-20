@@ -43,28 +43,31 @@ export function ThemeToggle() {
   const [isDark, setIsDark] = useState<boolean | null>(null);
 
   useEffect(() => {
-    setIsDark(document.documentElement.classList.contains("dark"));
+    try {
+      const stored = localStorage.getItem("theme");
+      const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      setIsDark(stored === "dark" || (stored === null && prefersDark));
+    } catch {
+      setIsDark(document.documentElement.classList.contains("dark"));
+    }
   }, []);
 
   if (isDark === null) return null;
 
   function toggle() {
-    const next = !isDark;
-    setIsDark(next);
-    if (next) {
-      document.documentElement.classList.add("dark");
-      localStorage.setItem("theme", "dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-      localStorage.setItem("theme", "light");
-    }
+    setIsDark((prev) => {
+      const next = !prev;
+      document.documentElement.classList.toggle("dark", next);
+      localStorage.setItem("theme", next ? "dark" : "light");
+      return next;
+    });
   }
 
   return (
     <button
       onClick={toggle}
       aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
-      className="rounded border border-neutral-300 p-1 text-neutral-600 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-900"
+      className="rounded border border-neutral-300 p-1.5 text-neutral-600 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-900"
     >
       {isDark ? <SunIcon /> : <MoonIcon />}
     </button>
