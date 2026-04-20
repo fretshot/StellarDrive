@@ -50,6 +50,26 @@ export async function POST(req: Request) {
     if (!ownedOrg) return new Response("Org not found", { status: 404 });
   }
 
+  // Rate limit: 20 user messages per 60 seconds
+  const sixtySecondsAgo = new Date(Date.now() - 60 * 1000).toISOString();
+  const { count: recentMessageCount } = await supabase
+    .from("chat_messages")
+    .select("id", { count: "exact", head: true })
+    .eq("role", "user")
+    .gte("created_at", sixtySecondsAgo);
+  if ((recentMessageCount ?? 0) >= 20) {
+    return new Response(
+      JSON.stringify({ error: "rate_limited", retryAfter: 60 }),
+      {
+        status: 429,
+        headers: {
+          "Content-Type": "application/json",
+          "Retry-After": "60",
+        },
+      },
+    );
+  }
+
   // Extract last user message text from parts array (AI SDK v6 UIMessage shape)
   const lastMsg = messages.at(-1);
   const userText = lastMsg?.parts
