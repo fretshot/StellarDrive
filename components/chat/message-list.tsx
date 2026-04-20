@@ -105,12 +105,19 @@ interface PreviewOutput {
 function isPreviewOutput(output: unknown): output is PreviewOutput {
   if (output === null || typeof output !== "object") return false;
   const o = output as Record<string, unknown>;
+  if (
+    typeof o.previewId !== "string" ||
+    typeof o.batchIndex !== "number" ||
+    typeof o.messageId !== "string" ||
+    o.preview === null ||
+    typeof o.preview !== "object"
+  ) return false;
+  const p = o.preview as Record<string, unknown>;
   return (
-    typeof o.previewId === "string" &&
-    typeof o.batchIndex === "number" &&
-    typeof o.messageId === "string" &&
-    o.preview !== null &&
-    typeof o.preview === "object"
+    typeof p.actionType === "string" &&
+    typeof p.summary === "string" &&
+    Array.isArray(p.targets) &&
+    Array.isArray(p.risks)
   );
 }
 
