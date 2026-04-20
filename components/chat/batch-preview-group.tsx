@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { ActionPreviewCard } from "@/components/chat/action-preview-card";
 import type { ActionPreview } from "@/lib/actions/types";
 
@@ -17,6 +17,7 @@ interface PreviewItem {
   previewId: string;
   batchIndex: number;
   preview: ActionPreview;
+  expiresAt?: number;
 }
 
 interface BatchPreviewGroupProps {
@@ -66,6 +67,7 @@ export function BatchPreviewGroup({
   const [loading, setLoading] = useState(false);
   const [resolved, setResolved] = useState(false);
   const [confirmSteps, setConfirmSteps] = useState<StepResult[] | null>(null);
+  const [, setExpiredTick] = useState(0);
 
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -73,7 +75,29 @@ export function BatchPreviewGroup({
     return () => { mountedRef.current = false; };
   }, []);
 
-  const sorted = [...previews].sort((a, b) => a.batchIndex - b.batchIndex);
+  const sorted = useMemo(
+    () => [...previews].sort((a, b) => a.batchIndex - b.batchIndex),
+    [previews],
+  );
+
+  // Schedule a re-render at the earliest preview expiry so the expired state
+  // appears automatically without requiring user interaction.
+  useEffect(() => {
+    if (resolved) return;
+    const deadlines = sorted
+      .map((p) => p.expiresAt)
+      .filter((t): t is number => t !== undefined);
+    if (deadlines.length === 0) return;
+    const nearest = Math.min(...deadlines);
+    const ms = nearest - Date.now();
+    if (ms <= 0) return;
+    const id = setTimeout(() => setExpiredTick((n) => n + 1), ms);
+    return () => clearTimeout(id);
+  }, [resolved, sorted]);
+
+  const expired =
+    !resolved &&
+    sorted.some((p) => p.expiresAt !== undefined && Date.now() > p.expiresAt);
 
   async function handleConfirmAll() {
     if (loading || resolved) return;
@@ -171,7 +195,13 @@ export function BatchPreviewGroup({
         </div>
       )}
 
-      {!resolved && (
+      {!resolved && expired && (
+        <div className="rounded border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-500 dark:border-neutral-700 dark:bg-neutral-900/40">
+          These previews have expired — ask again to create new ones.
+        </div>
+      )}
+
+      {!resolved && !expired && (
         <div className="flex items-center gap-2">
           <button
             type="button"

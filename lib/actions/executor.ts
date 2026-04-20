@@ -15,7 +15,7 @@ export async function buildPreview<I>(
   input: I,
   ctx: ActionContext,
   batchIndex = 0,
-): Promise<{ previewId: string; preview: unknown }> {
+): Promise<{ previewId: string; preview: unknown; expiresAt: number }> {
   if (action.readOnly) {
     throw new ActionError("internal", "preview_on_read_only", "Read-only actions do not produce previews");
   }
@@ -41,7 +41,7 @@ export async function buildPreview<I>(
       status: "pending",
       batch_index: batchIndex,
     })
-    .select("id")
+    .select("id, created_at")
     .single();
   if (error || !data) {
     throw new ActionError("internal", "preview_persist_failed", error?.message ?? "no row");
@@ -56,7 +56,8 @@ export async function buildPreview<I>(
     metadata: { preview_id: data.id, validation },
   });
 
-  return { previewId: data.id, preview };
+  const expiresAt = new Date(data.created_at).getTime() + PREVIEW_TTL_MS;
+  return { previewId: data.id, preview, expiresAt };
 }
 
 /**
