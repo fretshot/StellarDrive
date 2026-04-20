@@ -14,6 +14,13 @@ import { MessageList } from "@/components/chat/message-list";
 import { ChatInput } from "@/components/chat/chat-input";
 import { EmptyState } from "@/components/ui/empty-state";
 
+const STARTER_PROMPTS = [
+  "Summarize the most important custom objects in this org.",
+  "List the fields on Account that are required for create.",
+  "Show me Apex classes related to integrations.",
+  "Create a preview for a custom field called Renewal_Date__c on Opportunity.",
+] as const;
+
 // ── v6 AbstractChat concrete implementation ───────────────────────────────────
 //
 // AI SDK v6 removed the useChat React hook from the `ai` package.
@@ -112,6 +119,16 @@ interface ChatPanelProps {
   initialSessionId: string | null;
   initialMessages: UIMessage[];
   activeOrgId: string | null;
+  activeOrg: ChatOrgSummary | null;
+}
+
+export interface ChatOrgSummary {
+  id: string;
+  name: string;
+  status: string | null;
+  orgType: string | null;
+  instanceUrl: string | null;
+  lastSyncAt: string | null;
 }
 
 // ── component ─────────────────────────────────────────────────────────────────
@@ -121,6 +138,7 @@ export function ChatPanel({
   initialSessionId,
   initialMessages,
   activeOrgId,
+  activeOrg,
 }: ChatPanelProps) {
   const router = useRouter();
   const [sessionId, setSessionId] = useState<string | null>(initialSessionId);
@@ -186,30 +204,38 @@ export function ChatPanel({
     setSessionId(null);
     sessionIdRef.current = null;
     setChat(buildChat([]));
+    setInput("");
+    inputRef.current = "";
     router.push("/dashboard/chat", { scroll: false });
   }
 
-  function handleSubmit() {
-    if (!input.trim() || isLoading) return;
-    const text = input;
+  function submitText(text: string) {
+    const trimmed = text.trim();
+    if (!trimmed || isLoading) return;
+    inputRef.current = trimmed;
     setInput("");
-    chat.sendMessage({ text });
+    chat.sendMessage({ text: trimmed });
+  }
+
+  function handleSubmit() {
+    submitText(input);
   }
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full min-h-0 flex-1 overflow-hidden overscroll-none rounded-2xl border border-neutral-200 bg-white shadow-sm dark:border-neutral-800 dark:bg-neutral-950">
       <SessionSidebar
         sessions={sessions}
         activeSessionId={sessionId}
         onNew={handleNew}
       />
 
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <ChatHeader />
         {sessionId === null && messages.length === 0 ? (
           <div className="flex flex-1 items-center justify-center p-8">
-            <EmptyState
-              title="Start a conversation"
-              description="Ask anything about your connected Salesforce org — objects, fields, Apex classes, and more."
+            <ChatWelcomeState
+              hasActiveOrg={Boolean(activeOrgId)}
+              onPromptSelect={submitText}
             />
           </div>
         ) : (
@@ -224,7 +250,90 @@ export function ChatPanel({
           onChange={setInput}
           onSubmit={handleSubmit}
           isLoading={isLoading}
+          activeOrgName={activeOrg?.name ?? null}
         />
+      </div>
+    </div>
+  );
+}
+
+function ChatHeader() {
+  return (
+    <div className="shrink-0 border-b border-neutral-200 bg-white/90 px-6 py-3 backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/90">
+      <div className="mx-auto w-full max-w-4xl">
+        <h1 className="text-sm font-semibold text-neutral-950 dark:text-neutral-50">
+          StellarDrive Assistant
+        </h1>
+        <p className="text-xs text-neutral-500">
+          Read metadata, inspect org structure, and prepare create-only action previews.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function ChatWelcomeState({
+  hasActiveOrg,
+  onPromptSelect,
+}: {
+  hasActiveOrg: boolean;
+  onPromptSelect: (prompt: string) => void;
+}) {
+  if (!hasActiveOrg) {
+    return (
+      <div className="w-full max-w-3xl">
+        <EmptyState
+          title="Connect a Salesforce org first"
+          description="The assistant can still explain capabilities, but most useful answers and action previews need an active org."
+          action={(
+            <a
+              href="/dashboard/orgs"
+              className="inline-flex rounded-lg bg-neutral-900 px-3 py-2 text-sm font-medium text-white hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
+            >
+              Open connected orgs
+            </a>
+          )}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full max-w-4xl">
+      <div className="rounded-[28px] border border-neutral-200 bg-[linear-gradient(135deg,rgba(245,245,244,0.95),rgba(255,255,255,1))] p-10 shadow-sm dark:border-neutral-800 dark:bg-[linear-gradient(135deg,rgba(24,24,27,0.92),rgba(10,10,10,1))]">
+        <div className="max-w-2xl">
+          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
+            Desktop Workspace
+          </div>
+          <h2 className="mt-3 text-3xl font-semibold tracking-tight text-neutral-950 dark:text-neutral-50">
+            Start with a concrete question.
+          </h2>
+          <p className="mt-3 text-sm leading-6 text-neutral-600 dark:text-neutral-300">
+            Use the assistant to inspect metadata, find gaps, or prepare guarded create actions.
+            Every write operation is previewed first and requires confirmation.
+          </p>
+        </div>
+
+        <div className="mt-8 grid gap-3 xl:grid-cols-2">
+          {STARTER_PROMPTS.map((prompt) => (
+            <button
+              key={prompt}
+              type="button"
+              onClick={() => onPromptSelect(prompt)}
+              className="group rounded-2xl border border-neutral-200 bg-white/90 px-4 py-4 text-left transition hover:-translate-y-0.5 hover:border-neutral-400 hover:shadow-sm dark:border-neutral-800 dark:bg-neutral-950/80 dark:hover:border-neutral-600"
+            >
+              <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-500">
+                Starter
+              </div>
+              <div className="mt-2 text-sm font-medium leading-6 text-neutral-900 dark:text-neutral-100">
+                {prompt}
+              </div>
+              <div className="mt-3 text-xs text-neutral-500 group-hover:text-neutral-700 dark:group-hover:text-neutral-300">
+                Send prompt
+              </div>
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );
