@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (preview.user_id !== user.id) {
-      return NextResponse.json({ error: "forbidden" }, { status: 401 });
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
     }
 
     if (preview.status !== "pending") {
@@ -55,7 +55,8 @@ export async function POST(request: NextRequest) {
     const { error: updateError } = await admin
       .from("action_previews")
       .update({ status: "rejected" })
-      .eq("id", previewId);
+      .eq("id", previewId)
+      .eq("user_id", user.id);
 
     if (updateError) {
       throw new ActionError("internal", "update_failed", "Failed to reject preview", updateError);
