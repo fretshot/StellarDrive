@@ -9,29 +9,46 @@ user message
 intent classifier  ──────►  informational → run read-only tools, answer
    │
    ▼
-Claude (Opus) with tool use
+Claude (Opus) with full tool registry
    │
    ├── read-only tool_use  ──► execute immediately, pass result back as tool_result
    │
-   └── mutating tool_use   ──► build preview  ──► persist action_previews (status=pending)
+   └── mutating tool_use   ──► buildPreview()  ──► persist action_previews (status=pending)
+                                  returns { previewId, batchIndex, messageId, preview }
+                                  (Claude may call multiple mutating tools → batch)
                                                    │
                                                    ▼
-                                          UI renders confirmation card
+                              UI detects previewId in tool outputs
+                              BatchPreviewGroup renders all cards + buttons
                                                    │
                                       ┌────────────┴────────────┐
-                                  reject                     confirm
+                                  "Reject all"             "Confirm all (N)"
                                     │                          │
                                     ▼                          ▼
-                        status=rejected            POST /api/actions/execute
-                                                             │
-                                                             ▼
-                                                     validate + execute
-                                                             │
-                                                             ▼
-                                        action_executions + audit_logs written
+                    POST /api/actions/reject         POST /api/actions/execute-batch
+                    (once per previewId,              body: { messageId }
+                     sequential loop)                         │
+                    status=rejected                            ▼
+                                                    load all pending previews
+                                                    ordered by batch_index
+                                                              │
+                                                    for each step in order:
+                                                      resolve $ref tokens
+                                                      validate + execute
+                                                      stop on first failure
+                                                              │
+                                                              ▼
+                                              action_executions + audit_logs written
+                                              remaining pending previews → failed
 ```
 
-Mutations are **never** fired from inside Claude's tool loop. Mutating tools return previews; only the user (via the UI) can fire `execute`.
+Mutations are **never** fired from inside Claude's tool loop. Mutating tools return previews; only the user (via the UI) can fire execution. A single `messageId` ties all previews in a turn into one batch.
+
+### $ref dependency resolution
+
+When a later step depends on the output of an earlier step, Claude uses `$ref:step[N].fieldPath` tokens as field values in the tool input. The token is stored verbatim in `action_previews.payload` and resolved server-side at execute time using prior step results. The client never sees resolved IDs.
+
+Example: `assign_permission_set` with `permissionSetId: "$ref:step[0].id"` — resolved to the actual Salesforce ID returned by the preceding `create_permission_set` step.
 
 ## Models
 
@@ -47,6 +64,7 @@ A single static system prompt ends with a fixed contract:
 - "For mutating actions, always return a `tool_use` that produces a preview. Do not claim an action has succeeded until the user confirms and the system returns a success `tool_result`."
 - "CREATE operations only. Update and delete do not exist in this system."
 - "When uncertain about an org, object, or field, call a read-only tool first instead of guessing."
+- "When you call a mutating tool you will receive `{ previewId, batchIndex, preview }` — not a Salesforce result. The action has not executed yet; it is pending user confirmation. To reference the output of a prior step in the same batch, use `$ref:step[N].fieldPath` as a field value where N is the zero-based step index."
 
 ## Intent classification
 
@@ -91,6 +109,7 @@ interface ActionDefinition<I, P, R> {
 | `list_fields`         | List persisted fields for an object.                    |
 | `list_apex_classes`   | List persisted Apex classes, filtered.                  |
 | `search_metadata`     | Full-text-ish search across persisted metadata.         |
+| `search_users`        | Query live Salesforce for User records by name. Returns Salesforce User IDs for use in mutating tools (e.g. `assign_permission_set`). This is the only read-only tool that hits Salesforce directly rather than the local DB. |
 
 ### Phase 1 mutating tools
 
@@ -135,19 +154,25 @@ A failed validation blocks execution and writes an `audit_logs` row with outcome
 
 ## Execution
 
-`POST /api/actions/execute` body: `{ previewId: string }`.
+### Batch execution
 
-Server behavior (transactional where possible):
+`POST /api/actions/execute-batch` body: `{ messageId: string (UUID) }`.
 
-1. Load preview under RLS. Reject if not `pending` or older than 15 minutes.
-2. Re-run `validate`. Reject on failure.
-3. Mark preview `confirmed`, set `confirmed_at`.
-4. Insert `action_executions` (`status=running`).
-5. Run `execute` in a try/catch.
-6. Update `action_executions` (`status=succeeded|failed`, `result`, `error`, `finished_at`).
-7. Update preview (`status=executed|failed`).
-8. Write `audit_logs` (`action_type='action.executed'`, with outcome).
-9. Return a structured response for the chat UI to append as a `tool_result` to the conversation.
+Server behavior:
+
+1. Load all `pending` previews for `messageId` where `user_id = ctx.userId`, ordered by `batch_index`.
+2. For each step in order:
+   a. Ownership + TTL check. Mark `failed` on violation.
+   b. Resolve `$ref:step[N].fieldPath` tokens using prior step results.
+   c. Re-run `validate`. Mark `failed` on failure, write audit row.
+   d. Mark preview `confirmed`, insert `action_executions (status=running)`.
+   e. Run `execute`. On success: mark `executed`, write audit. On failure: mark `failed`, write audit.
+   f. **Stop-on-failure**: remaining `pending` previews are marked `failed` and returned as `"skipped"`.
+3. Return `{ steps: BatchStepResult[] }` where each step has `status: "executed" | "failed" | "skipped"`.
+
+### Single-preview execution (legacy path)
+
+`POST /api/actions/execute` body: `{ previewId: string }` — retained for non-batch flows. Follows the same validate → confirm → execute → audit sequence for a single preview.
 
 ## Error handling
 

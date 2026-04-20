@@ -214,7 +214,7 @@ export async function executeBatch(
 
   for (const row of rows) {
     if (failed) {
-      await admin.from("action_previews").update({ status: "expired" }).eq("id", row.id);
+      await admin.from("action_previews").update({ status: "failed" }).eq("id", row.id);
       steps.push({ previewId: row.id, status: "skipped" });
       continue;
     }
@@ -255,6 +255,7 @@ export async function executeBatch(
     if (action.validate) {
       const v = await action.validate(parsedInput.data, execCtx);
       if (!v.ok) {
+        await admin.from("action_previews").update({ status: "failed" }).eq("id", row.id);
         await writeAudit({
           user_id: ctx.userId,
           org_id: row.org_id,

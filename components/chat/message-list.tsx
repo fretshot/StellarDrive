@@ -222,7 +222,6 @@ function ToolRows({ parts }: { parts: Part[] }) {
           messageId={batchMessageId}
           onResolved={() => {
             // No-op for Phase 1: the next assistant message turn will surface results.
-            console.log("[BatchPreviewGroup] resolved for message", batchMessageId);
           }}
         />
       )}
