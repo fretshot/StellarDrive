@@ -112,18 +112,21 @@ export async function executePreview(
     .update({ status: "confirmed", confirmed_at: new Date().toISOString() })
     .eq("id", row.id);
 
-  const { data: exec } = await admin
+  const { data: exec, error: execInsertError } = await admin
     .from("action_executions")
     .insert({ preview_id: row.id, status: "running" })
     .select("id")
     .single();
+  if (execInsertError || !exec) {
+    throw new ActionError("internal", "exec_insert_failed", execInsertError?.message ?? "no row");
+  }
 
   try {
     const result = await action.execute(parsedInput.data, ctx);
     await admin
       .from("action_executions")
       .update({ status: "succeeded", result, finished_at: new Date().toISOString() })
-      .eq("id", exec!.id);
+      .eq("id", exec.id);
     await admin.from("action_previews").update({ status: "executed" }).eq("id", row.id);
     await writeAudit({
       user_id: ctx.userId,
@@ -139,7 +142,7 @@ export async function executePreview(
     await admin
       .from("action_executions")
       .update({ status: "failed", error: message, finished_at: new Date().toISOString() })
-      .eq("id", exec!.id);
+      .eq("id", exec.id);
     await admin.from("action_previews").update({ status: "failed" }).eq("id", row.id);
     await writeAudit({
       user_id: ctx.userId,
@@ -198,6 +201,7 @@ export async function executeBatch(
     .from("action_previews")
     .select("id, user_id, org_id, action_type, payload, status, created_at")
     .eq("message_id", messageId)
+    .eq("user_id", ctx.userId)
     .eq("status", "pending")
     .order("batch_index", { ascending: true });
 
@@ -270,11 +274,17 @@ export async function executeBatch(
       .update({ status: "confirmed", confirmed_at: new Date().toISOString() })
       .eq("id", row.id);
 
-    const { data: exec } = await admin
+    const { data: exec, error: execInsertError } = await admin
       .from("action_executions")
       .insert({ preview_id: row.id, status: "running" })
       .select("id")
       .single();
+    if (execInsertError || !exec) {
+      await admin.from("action_previews").update({ status: "failed" }).eq("id", row.id);
+      steps.push({ previewId: row.id, status: "failed", error: "Failed to create execution record" });
+      failed = true;
+      continue;
+    }
 
     try {
       const result = await action.execute(parsedInput.data, execCtx);
@@ -282,7 +292,7 @@ export async function executeBatch(
       await admin
         .from("action_executions")
         .update({ status: "succeeded", result, finished_at: new Date().toISOString() })
-        .eq("id", exec!.id);
+        .eq("id", exec.id);
       await admin.from("action_previews").update({ status: "executed" }).eq("id", row.id);
       await writeAudit({
         user_id: ctx.userId,
@@ -299,7 +309,7 @@ export async function executeBatch(
       await admin
         .from("action_executions")
         .update({ status: "failed", error: message, finished_at: new Date().toISOString() })
-        .eq("id", exec!.id);
+        .eq("id", exec.id);
       await admin.from("action_previews").update({ status: "failed" }).eq("id", row.id);
       await writeAudit({
         user_id: ctx.userId,

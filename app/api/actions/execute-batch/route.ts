@@ -8,7 +8,7 @@ import { ActionError } from "@/lib/actions/types";
 export const runtime = "nodejs";
 
 const Body = z.object({
-  messageId: z.string(),
+  messageId: z.string().uuid(),
 });
 
 export async function POST(request: NextRequest) {
@@ -40,7 +40,6 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
-    const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: message }, { status: 500 });
+    throw err;
   }
 }
