@@ -100,6 +100,7 @@ interface PreviewOutput {
   batchIndex: number;
   messageId: string;
   preview: ActionPreview;
+  expiresAt?: number;
 }
 
 function isPreviewOutput(output: unknown): output is PreviewOutput {
@@ -218,6 +219,7 @@ function ToolRows({ parts }: { parts: Part[] }) {
             previewId: o.previewId,
             batchIndex: o.batchIndex,
             preview: o.preview,
+            expiresAt: o.expiresAt,
           }))}
           messageId={batchMessageId}
           onResolved={() => {

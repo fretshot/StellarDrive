@@ -47,8 +47,8 @@ export function buildAiSdkTools(readOnly: boolean, ctx: ActionContext) {
             // Mutating: persist preview, return preview metadata to Claude
             try {
               const index = batchIndex++;
-              const { previewId, preview } = await buildPreview(action, input as any, ctx, index);
-              return { previewId, batchIndex: index, messageId: ctx.messageId, preview };
+              const { previewId, preview, expiresAt } = await buildPreview(action, input as any, ctx, index);
+              return { previewId, batchIndex: index, messageId: ctx.messageId, preview, expiresAt };
             } catch (err) {
               return { error: err instanceof Error ? err.message : String(err) };
             }

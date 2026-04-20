@@ -17,6 +17,7 @@ interface PreviewItem {
   previewId: string;
   batchIndex: number;
   preview: ActionPreview;
+  expiresAt?: number;
 }
 
 interface BatchPreviewGroupProps {
@@ -74,6 +75,10 @@ export function BatchPreviewGroup({
   }, []);
 
   const sorted = [...previews].sort((a, b) => a.batchIndex - b.batchIndex);
+
+  const expired =
+    !resolved &&
+    sorted.some((p) => p.expiresAt !== undefined && Date.now() > p.expiresAt);
 
   async function handleConfirmAll() {
     if (loading || resolved) return;
@@ -171,7 +176,13 @@ export function BatchPreviewGroup({
         </div>
       )}
 
-      {!resolved && (
+      {!resolved && expired && (
+        <div className="rounded border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-500 dark:border-neutral-700 dark:bg-neutral-900/40">
+          These previews have expired — ask again to create new ones.
+        </div>
+      )}
+
+      {!resolved && !expired && (
         <div className="flex items-center gap-2">
           <button
             type="button"
