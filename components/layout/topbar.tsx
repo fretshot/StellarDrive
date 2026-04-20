@@ -1,6 +1,7 @@
 import { logout } from "@/app/(auth)/logout/actions";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { OrgSwitcher } from "@/components/layout/org-switcher";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { cookies } from "next/headers";
 import { ACTIVE_ORG_COOKIE } from "@/lib/active-org";
 
@@ -25,7 +26,10 @@ export async function Topbar() {
 
   return (
     <header className="flex h-12 items-center justify-between border-b border-neutral-200 bg-white px-4 dark:border-neutral-800 dark:bg-neutral-950">
-      <OrgSwitcher orgs={orgList} activeOrgId={activeOrgId} />
+      <div className="flex items-center gap-2">
+        <OrgSwitcher orgs={orgList} activeOrgId={activeOrgId} />
+        <ThemeToggle />
+      </div>
       <div className="flex items-center gap-3 text-sm">
         <span className="text-neutral-500">{user?.email}</span>
         <form action={logout}>
