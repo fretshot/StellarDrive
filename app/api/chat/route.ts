@@ -50,13 +50,24 @@ export async function POST(req: Request) {
     if (!ownedOrg) return new Response("Org not found", { status: 404 });
   }
 
-  // Rate limit: 20 user messages per 60 seconds
+  // Rate limit: 20 user messages per 60 seconds.
+  // chat_messages has no user_id column — scope explicitly via session_id to
+  // avoid relying solely on RLS for correctness.
   const sixtySecondsAgo = new Date(Date.now() - 60 * 1000).toISOString();
-  const { count: recentMessageCount } = await supabase
-    .from("chat_messages")
-    .select("id", { count: "exact", head: true })
-    .eq("role", "user")
-    .gte("created_at", sixtySecondsAgo);
+  const { data: userSessions } = await supabase
+    .from("chat_sessions")
+    .select("id")
+    .eq("user_id", user.id);
+  const userSessionIds = (userSessions ?? []).map((s) => s.id);
+  const { count: recentMessageCount } =
+    userSessionIds.length > 0
+      ? await supabase
+          .from("chat_messages")
+          .select("id", { count: "exact", head: true })
+          .in("session_id", userSessionIds)
+          .eq("role", "user")
+          .gte("created_at", sixtySecondsAgo)
+      : { count: 0 };
   if ((recentMessageCount ?? 0) >= 20) {
     return new Response(
       JSON.stringify({ error: "rate_limited", retryAfter: 60 }),

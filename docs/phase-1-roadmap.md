@@ -149,7 +149,7 @@ Milestones are ordered. Each one is a standalone deliverable — merge, verify, 
 **Tasks.**
 - Empty states on every list page.
 - Loading and error states on all async boundaries.
-- Rate limiting on `/api/chat` (per user) and on Salesforce calls (per org, via the connection module).
+- Rate limiting on `/api/chat` (per user, 20 messages / 60 s). Salesforce per-org API call throttling is intentionally deferred — Salesforce enforces its own daily limits at the platform layer and surfaces errors via jsforce; a redundant application-layer counter adds complexity without safety benefit for Phase 1.
 - Session/preview expiry handling in the UI.
 - Logout button in topbar.
 

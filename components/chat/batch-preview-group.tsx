@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { ActionPreviewCard } from "@/components/chat/action-preview-card";
 import type { ActionPreview } from "@/lib/actions/types";
 
@@ -75,7 +75,10 @@ export function BatchPreviewGroup({
     return () => { mountedRef.current = false; };
   }, []);
 
-  const sorted = [...previews].sort((a, b) => a.batchIndex - b.batchIndex);
+  const sorted = useMemo(
+    () => [...previews].sort((a, b) => a.batchIndex - b.batchIndex),
+    [previews],
+  );
 
   // Schedule a re-render at the earliest preview expiry so the expired state
   // appears automatically without requiring user interaction.
