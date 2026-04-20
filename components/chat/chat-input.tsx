@@ -6,9 +6,10 @@ interface ChatInputProps {
   onChange: (value: string) => void;
   onSubmit: () => void;
   isLoading: boolean;
+  activeOrgName: string | null;
 }
 
-export function ChatInput({ value, onChange, onSubmit, isLoading }: ChatInputProps) {
+export function ChatInput({ value, onChange, onSubmit, isLoading, activeOrgName }: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -28,35 +29,32 @@ export function ChatInput({ value, onChange, onSubmit, isLoading }: ChatInputPro
   }
 
   return (
-    <div className="border-t border-neutral-200 p-3 dark:border-neutral-800">
-      {value.length > 2000 && (
-        <p className="mb-1 text-xs text-amber-600 dark:text-amber-400">
-          Message is long ({value.length} chars) — consider splitting it up.
-        </p>
-      )}
-      <div className="flex items-end gap-2">
-        <textarea
-          ref={textareaRef}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={handleKeyDown}
-          disabled={isLoading}
-          placeholder="Ask about your Salesforce org…"
-          rows={1}
-          className="flex-1 resize-none rounded border border-neutral-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-400 disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-950"
-        />
-        <button
-          onClick={() => { if (!isLoading && value.trim()) onSubmit(); }}
-          disabled={isLoading || !value.trim()}
-          className="flex h-9 w-9 items-center justify-center rounded border border-neutral-300 text-sm hover:bg-neutral-50 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-900"
-          aria-label="Send"
-        >
-          {isLoading ? (
-            <span className="h-3 w-3 animate-spin rounded-full border-2 border-neutral-400 border-t-transparent" />
-          ) : (
-            "↑"
-          )}
-        </button>
+    <div className="shrink-0 border-t border-neutral-200 bg-white/95 px-6 py-4 backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/95">
+      <div className="mx-auto w-full max-w-4xl">
+        <div className="flex items-end gap-3 rounded-2xl border border-neutral-300 bg-neutral-50 p-3 shadow-sm dark:border-neutral-700 dark:bg-neutral-900">
+          <textarea
+            ref={textareaRef}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={handleKeyDown}
+            disabled={isLoading}
+            placeholder={activeOrgName ? `Ask about ${activeOrgName}…` : "Ask anything…"}
+            rows={1}
+            className="min-h-11 flex-1 resize-none bg-transparent px-1 py-2 text-sm focus:outline-none disabled:opacity-50"
+          />
+          <button
+            onClick={() => { if (!isLoading && value.trim()) onSubmit(); }}
+            disabled={isLoading || !value.trim()}
+            className="flex h-10 w-10 items-center justify-center rounded-xl bg-neutral-900 text-sm text-white hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-neutral-300 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200 dark:disabled:bg-neutral-700"
+            aria-label="Send"
+          >
+            {isLoading ? (
+              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+            ) : (
+              "↑"
+            )}
+          </button>
+        </div>
       </div>
     </div>
   );
