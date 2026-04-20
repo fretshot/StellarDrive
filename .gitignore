@@ -21,3 +21,6 @@ Thumbs.db
 # Claude Code local (per-user) settings
 .claude/settings.local.json
 .vercel
+
+# Git worktrees
+.worktrees
