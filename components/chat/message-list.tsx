@@ -281,6 +281,52 @@ function AssistantText({ text }: { text: string }) {
       continue;
     }
 
+    // Markdown table (lines starting with |, second line is separator |---|)
+    if (line.trimStart().startsWith("|") && lines[i + 1]?.trim().match(/^\|[-| :]+\|$/)) {
+      const tableLines: string[] = [];
+      while (i < lines.length && lines[i].trimStart().startsWith("|")) {
+        tableLines.push(lines[i]);
+        i++;
+      }
+      const parseRow = (row: string) =>
+        row.split("|").slice(1, -1).map((cell) => cell.trim());
+      const [headerRow, , ...dataRows] = tableLines; // skip separator row
+      const headers = parseRow(headerRow);
+      nodes.push(
+        <div key={nodes.length} className="my-2 overflow-x-auto">
+          <table className="w-full border-collapse text-xs">
+            <thead>
+              <tr className="border-b border-neutral-300 dark:border-neutral-600">
+                {headers.map((h, j) => (
+                  <th
+                    key={j}
+                    className="px-3 py-1.5 text-left font-semibold text-neutral-700 dark:text-neutral-300"
+                  >
+                    <InlineMarkdown text={h} />
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {dataRows.map((row, ri) => (
+                <tr
+                  key={ri}
+                  className="border-b border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/40"
+                >
+                  {parseRow(row).map((cell, ci) => (
+                    <td key={ci} className="px-3 py-1.5 text-neutral-800 dark:text-neutral-200">
+                      <InlineMarkdown text={cell} />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>,
+      );
+      continue;
+    }
+
     // Bullet list item
     if (/^(\s*[-*+]|\s*\d+\.)\s/.test(line)) {
       const listItems: string[] = [];
