@@ -3,7 +3,11 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
+}
+
+.dark {
+  color-scheme: dark;
 }
 
 html, body {
@@ -11,9 +15,5 @@ html, body {
 }
 
 body {
-  @apply bg-neutral-50 text-neutral-900 antialiased;
-}
-
-.dark body {
-  @apply bg-neutral-950 text-neutral-100;
+  @apply bg-neutral-50 text-neutral-900 antialiased dark:bg-neutral-950 dark:text-neutral-100;
 }
