@@ -177,7 +177,20 @@ export function BatchPreviewGroup({
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3 rounded-[24px] border border-neutral-200 bg-neutral-50/80 p-4 dark:border-neutral-800 dark:bg-neutral-900/40">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
+            Action batch
+          </div>
+          <div className="mt-1 text-sm font-medium text-neutral-900 dark:text-neutral-100">
+            Review each step before anything is executed.
+          </div>
+        </div>
+        <div className="rounded-full bg-neutral-200 px-2.5 py-1 text-[11px] font-medium text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300">
+          {sorted.length} step{sorted.length === 1 ? "" : "s"}
+        </div>
+      </div>
       {sorted.map((item) => (
         <ActionPreviewCard
           key={item.previewId}
@@ -202,12 +215,12 @@ export function BatchPreviewGroup({
       )}
 
       {!resolved && !expired && (
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 pt-1">
           <button
             type="button"
             onClick={handleConfirmAll}
             disabled={loading}
-            className="inline-flex items-center gap-1.5 rounded bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-600 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-green-700 dark:hover:bg-green-600"
+            className="inline-flex items-center gap-1.5 rounded-xl bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-600 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-green-700 dark:hover:bg-green-600"
           >
             {loading ? (
               <>
@@ -223,7 +236,7 @@ export function BatchPreviewGroup({
             type="button"
             onClick={handleRejectAll}
             disabled={loading}
-            className="inline-flex items-center gap-1.5 rounded border border-neutral-300 bg-white px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-red-50 hover:border-red-300 hover:text-red-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-red-950/40 dark:hover:border-red-700 dark:hover:text-red-300"
+            className="inline-flex items-center gap-1.5 rounded-xl border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-red-50 hover:border-red-300 hover:text-red-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-red-950/40 dark:hover:border-red-700 dark:hover:text-red-300"
           >
             Reject all
           </button>

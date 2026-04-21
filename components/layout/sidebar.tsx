@@ -15,7 +15,7 @@ const NAV = [
 export function Sidebar() {
   const pathname = usePathname();
   return (
-    <aside className="flex w-56 shrink-0 flex-col border-r border-neutral-200 bg-white px-3 py-4 dark:border-neutral-800 dark:bg-neutral-950">
+    <aside className="sticky top-0 flex h-screen w-56 shrink-0 flex-col overflow-y-auto border-r border-neutral-200 bg-white px-3 py-4 dark:border-neutral-800 dark:bg-neutral-950">
       <div className="mb-6 px-2">
         <div className="text-sm font-semibold tracking-tight">StellarDrive</div>
         <div className="text-xs text-neutral-500">Salesforce, AI-assisted</div>

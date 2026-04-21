@@ -5,7 +5,7 @@ import type { UIMessage } from "ai";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { requireEnv } from "@/lib/env";
 import { classifyIntent } from "@/lib/ai/intent";
-import { SYSTEM_PROMPT } from "@/lib/ai/system-prompt";
+import { buildSystemPrompt } from "@/lib/ai/system-prompt";
 import { buildAiSdkTools } from "@/lib/ai/tool-definitions";
 import { getSalesforceConnection } from "@/lib/salesforce/connection";
 import type { ActionContext } from "@/lib/actions/types";
@@ -39,15 +39,21 @@ export async function POST(req: Request) {
     if (!owned) return new Response("Session not found", { status: 404 });
   }
 
-  // Fix 2 — IDOR: Validate activeOrgId ownership
+  // Fix 2 — IDOR: Validate activeOrgId ownership, and fetch details for system prompt
+  let activeOrg: { id: string; name: string; instanceUrl: string | null } | null = null;
   if (activeOrgId) {
     const { data: ownedOrg } = await supabase
       .from("connected_salesforce_orgs")
-      .select("id")
+      .select("id, display_name, alias, sf_org_id, instance_url")
       .eq("id", activeOrgId)
       .eq("user_id", user.id)
       .single();
     if (!ownedOrg) return new Response("Org not found", { status: 404 });
+    activeOrg = {
+      id: ownedOrg.id,
+      name: ownedOrg.display_name ?? ownedOrg.alias ?? ownedOrg.sf_org_id,
+      instanceUrl: ownedOrg.instance_url,
+    };
   }
 
   // Rate limit: 20 user messages per 60 seconds.
@@ -139,7 +145,7 @@ export async function POST(req: Request) {
 
   const result = streamText({
     model: anthropic("claude-opus-4-7"),
-    system: SYSTEM_PROMPT,
+    system: buildSystemPrompt(activeOrg),
     messages: modelMessages,
     tools: buildAiSdkTools(isReadOnly, ctx),
     stopWhen: stepCountIs(10),
