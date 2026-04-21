@@ -5,18 +5,30 @@ import {
   createCustomField as sfCreateCustomField,
   createCustomObject as sfCreateCustomObject,
   createPermissionSet as sfCreatePermissionSet,
+  updateCustomObject as sfUpdateCustomObject,
+  updateCustomField as sfUpdateCustomField,
+  manageFieldPermissions as sfManageFieldPermissions,
+  writeApexClass as sfWriteApexClass,
+  writeApexTrigger as sfWriteApexTrigger,
 } from "@/lib/salesforce/metadata-deploy";
 import {
   createRecord as sfCreateRecord,
   assignPermissionSet as sfAssignPermissionSet,
+  dmlRecords as sfDmlRecords,
 } from "@/lib/salesforce/records";
+import {
+  describeObject as sfDescribeObject,
+  queryRecords as sfQueryRecords,
+  aggregateQuery as sfAggregateQuery,
+  searchAll as sfSearchAll,
+  readApexClass as sfReadApexClass,
+  readApexTrigger as sfReadApexTrigger,
+} from "@/lib/salesforce/metadata";
 
 /**
  * The AI tool registry. Each action declares its input schema, whether it
  * is read-only, and how to preview/validate/execute itself. The AI layer
  * never calls Salesforce directly — only via actions registered here.
- *
- * Phase 1: CREATE only. No update/delete tools exist.
  */
 
 // ---------- Read-only ----------
@@ -383,6 +395,362 @@ const assignPermissionSet: ActionDefinition<z.infer<typeof AssignPermissionSetIn
   },
 };
 
+// ---------- New expanded tool set ----------
+
+const salesforceSearchObjects: ActionDefinition<{ orgId: string; query: string; limit?: number }> = {
+  name: "salesforce_search_objects",
+  label: "Search objects",
+  description: "Search for standard and custom SObjects by partial name or label match.",
+  readOnly: true,
+  input: z.object({ orgId: z.string().uuid(), query: z.string().min(1), limit: z.number().int().min(1).max(200).optional() }).strict(),
+  async execute(input, ctx) {
+    const term = `%${input.query}%`;
+    const { data } = await ctx.supabase
+      .from("salesforce_metadata_objects")
+      .select("api_name, label, is_custom, createable, key_prefix")
+      .eq("org_id", input.orgId)
+      .or(`api_name.ilike.${term},label.ilike.${term}`)
+      .order("api_name", { ascending: true })
+      .limit(input.limit ?? 50);
+    return data ?? [];
+  },
+};
+
+const salesforceDescribeObject: ActionDefinition<{ orgId: string; objectApiName: string }> = {
+  name: "salesforce_describe_object",
+  label: "Describe object (live)",
+  description: "Get detailed object schema from Salesforce: fields, relationships, picklist values. Use when you need picklist options or complete relationship info.",
+  readOnly: true,
+  input: z.object({ orgId: z.string().uuid(), objectApiName: z.string().min(1) }).strict(),
+  async execute(input, ctx) {
+    const conn = await ctx.getConnection(input.orgId);
+    return sfDescribeObject(conn, input.objectApiName);
+  },
+};
+
+const salesforceQueryRecords: ActionDefinition<{ orgId: string; soql: string }> = {
+  name: "salesforce_query_records",
+  label: "Query records",
+  description: "Execute a SOQL query with relationship support (parent-to-child, child-to-parent, complex WHERE). For GROUP BY or aggregate functions use salesforce_aggregate_query.",
+  readOnly: true,
+  input: z.object({ orgId: z.string().uuid(), soql: z.string().min(1) }).strict(),
+  async execute(input, ctx) {
+    const conn = await ctx.getConnection(input.orgId);
+    return sfQueryRecords(conn, input.soql);
+  },
+};
+
+const salesforceAggregateQuery: ActionDefinition<{ orgId: string; soql: string }> = {
+  name: "salesforce_aggregate_query",
+  label: "Aggregate query",
+  description: "Execute a SOQL aggregate query with GROUP BY, COUNT, COUNT_DISTINCT, SUM, AVG, MIN, MAX, or HAVING. Do NOT use for plain record queries — use salesforce_query_records instead.",
+  readOnly: true,
+  input: z.object({ orgId: z.string().uuid(), soql: z.string().min(1) }).strict(),
+  async execute(input, ctx) {
+    const conn = await ctx.getConnection(input.orgId);
+    return sfAggregateQuery(conn, input.soql);
+  },
+};
+
+const salesforceSearchAll: ActionDefinition<{ orgId: string; sosl: string }> = {
+  name: "salesforce_search_all",
+  label: "SOSL search",
+  description: "Search across multiple objects using a SOSL statement (FIND … IN … RETURNING …). Use for full-text search when you don't know which object holds the data.",
+  readOnly: true,
+  input: z.object({ orgId: z.string().uuid(), sosl: z.string().min(1) }).strict(),
+  async execute(input, ctx) {
+    const conn = await ctx.getConnection(input.orgId);
+    return sfSearchAll(conn, input.sosl);
+  },
+};
+
+const salesforceReadApex: ActionDefinition<{ orgId: string; namePattern: string }> = {
+  name: "salesforce_read_apex",
+  label: "Read Apex class",
+  description: "Fetch Apex class source code via Tooling API. namePattern supports * (multi-char) and ? (single-char) wildcards. Example: 'Account*' finds AccountController, AccountTriggerHandler, etc.",
+  readOnly: true,
+  input: z.object({ orgId: z.string().uuid(), namePattern: z.string().min(1) }).strict(),
+  async execute(input, ctx) {
+    const conn = await ctx.getConnection(input.orgId);
+    return sfReadApexClass(conn, input.namePattern);
+  },
+};
+
+const salesforceReadApexTrigger: ActionDefinition<{ orgId: string; namePattern: string }> = {
+  name: "salesforce_read_apex_trigger",
+  label: "Read Apex trigger",
+  description: "Fetch Apex trigger source code via Tooling API. namePattern supports * and ? wildcards. Includes trigger events, object, and API version.",
+  readOnly: true,
+  input: z.object({ orgId: z.string().uuid(), namePattern: z.string().min(1) }).strict(),
+  async execute(input, ctx) {
+    const conn = await ctx.getConnection(input.orgId);
+    return sfReadApexTrigger(conn, input.namePattern);
+  },
+};
+
+const salesforceDmlRecords: ActionDefinition<{
+  orgId: string;
+  operation: "insert" | "update" | "delete" | "upsert";
+  objectApiName: string;
+  records: Record<string, unknown>[];
+  externalIdField?: string;
+}> = {
+  name: "salesforce_dml_records",
+  label: "DML records",
+  description: "Perform insert, update, delete, or upsert on SObject records. Always look up record IDs via salesforce_query_records before updating or deleting. For upsert, provide externalIdField.",
+  readOnly: false,
+  input: z.object({
+    orgId: z.string().uuid(),
+    operation: z.enum(["insert", "update", "delete", "upsert"]),
+    objectApiName: z.string().min(1),
+    records: z.array(z.record(z.unknown())).min(1).max(200),
+    externalIdField: z.string().optional(),
+  }).strict(),
+  async preview(input) {
+    const count = input.records.length;
+    const op = input.operation.charAt(0).toUpperCase() + input.operation.slice(1);
+    return {
+      actionType: "dml_records",
+      summary: `${op} ${count} ${input.objectApiName} record${count !== 1 ? "s" : ""}`,
+      targets: [{ orgId: input.orgId, entity: input.objectApiName }],
+      risks: input.operation === "delete"
+        ? ["Records will be permanently deleted", "This operation cannot be undone without a backup"]
+        : input.operation === "update"
+        ? ["Existing field values will be overwritten"]
+        : [],
+      payload: input,
+    };
+  },
+  async execute(input, ctx) {
+    const conn = await ctx.getConnection(input.orgId);
+    return sfDmlRecords(conn, input);
+  },
+};
+
+const salesforceManageObject: ActionDefinition<{
+  orgId: string;
+  operation: "create" | "update";
+  apiName: string;
+  label?: string;
+  pluralLabel?: string;
+  nameFieldLabel?: string;
+  description?: string;
+  sharingModel?: "Private" | "ReadWrite" | "Read" | "ControlledByParent";
+}> = {
+  name: "salesforce_manage_object",
+  label: "Manage custom object",
+  description: "Create a new custom object or update properties of an existing one (label, description, sharing model). apiName must end with __c.",
+  readOnly: false,
+  input: z.object({
+    orgId: z.string().uuid(),
+    operation: z.enum(["create", "update"]),
+    apiName: z.string().min(1),
+    label: z.string().optional(),
+    pluralLabel: z.string().optional(),
+    nameFieldLabel: z.string().optional(),
+    description: z.string().optional(),
+    sharingModel: z.enum(["Private", "ReadWrite", "Read", "ControlledByParent"]).optional(),
+  }).strict(),
+  async validate(input) {
+    if (input.operation === "create" && (!input.label || !input.pluralLabel)) {
+      return { ok: false, issues: [{ path: "label", message: "label and pluralLabel are required for create" }] };
+    }
+    return { ok: true };
+  },
+  async preview(input) {
+    return {
+      actionType: "manage_object",
+      summary: `${input.operation === "create" ? "Create" : "Update"} custom object ${input.apiName}`,
+      targets: [{ orgId: input.orgId, entity: input.apiName }],
+      risks: input.operation === "create"
+        ? ["Creates a new custom object in the org metadata"]
+        : ["Updates object label or sharing model — existing automations may be affected"],
+      payload: input,
+    };
+  },
+  async execute(input, ctx) {
+    const conn = await ctx.getConnection(input.orgId);
+    if (input.operation === "create") {
+      return sfCreateCustomObject(conn, {
+        apiName: input.apiName,
+        label: input.label!,
+        pluralLabel: input.pluralLabel!,
+        nameFieldLabel: input.nameFieldLabel,
+        description: input.description,
+      });
+    }
+    return sfUpdateCustomObject(conn, input);
+  },
+};
+
+const salesforceManageField: ActionDefinition<{
+  orgId: string;
+  operation: "create" | "update";
+  objectApiName: string;
+  fieldApiName: string;
+  label?: string;
+  type?: "Text" | "TextArea" | "Checkbox" | "Number" | "Date" | "DateTime" | "Email" | "Phone" | "Url" | "Picklist" | "Currency" | "Percent";
+  length?: number;
+  required?: boolean;
+  description?: string;
+  grantAccessTo?: string[];
+}> = {
+  name: "salesforce_manage_field",
+  label: "Manage field",
+  description: "Add a new custom field to an object or update an existing field's properties. fieldApiName must end with __c. When creating, grants FLS (read+edit) to System Administrator by default; use grantAccessTo to specify other profiles.",
+  readOnly: false,
+  input: z.object({
+    orgId: z.string().uuid(),
+    operation: z.enum(["create", "update"]),
+    objectApiName: z.string().min(1),
+    fieldApiName: z.string().regex(/^[A-Za-z][A-Za-z0-9_]*__c$/, "Must end with __c"),
+    label: z.string().optional(),
+    type: z.enum(["Text","TextArea","Checkbox","Number","Date","DateTime","Email","Phone","Url","Picklist","Currency","Percent"]).optional(),
+    length: z.number().int().optional(),
+    required: z.boolean().optional(),
+    description: z.string().optional(),
+    grantAccessTo: z.array(z.string()).optional(),
+  }).strict(),
+  async validate(input) {
+    if (input.operation === "create" && (!input.label || !input.type)) {
+      return { ok: false, issues: [{ path: "label", message: "label and type are required for create" }] };
+    }
+    return { ok: true };
+  },
+  async preview(input) {
+    const profiles = input.grantAccessTo ?? ["System Administrator"];
+    return {
+      actionType: "manage_field",
+      summary: `${input.operation === "create" ? "Create" : "Update"} field ${input.objectApiName}.${input.fieldApiName}${input.operation === "create" ? ` — grants FLS to ${profiles.join(", ")}` : ""}`,
+      targets: [{ orgId: input.orgId, entity: `${input.objectApiName}.${input.fieldApiName}` }],
+      risks: input.operation === "create"
+        ? ["Adds a new column to the object", ...(input.required ? ["Required field may break existing record creation flows"] : [])]
+        : ["Modifies existing field properties — validation rules or page layouts may be affected"],
+      payload: input,
+    };
+  },
+  async execute(input, ctx) {
+    const conn = await ctx.getConnection(input.orgId);
+    if (input.operation === "create") {
+      await sfCreateCustomField(conn, {
+        objectApiName: input.objectApiName,
+        fieldApiName: input.fieldApiName,
+        label: input.label!,
+        type: input.type as any,
+        length: input.length,
+        required: input.required,
+        description: input.description,
+      });
+      const profiles = (input.grantAccessTo ?? ["System Administrator"]).map((name) => ({
+        name,
+        readable: true,
+        editable: true,
+      }));
+      return sfManageFieldPermissions(conn, {
+        objectApiName: input.objectApiName,
+        fieldApiName: input.fieldApiName,
+        profiles,
+      });
+    }
+    return sfUpdateCustomField(conn, input);
+  },
+};
+
+const salesforceManageFieldPermissions: ActionDefinition<{
+  orgId: string;
+  objectApiName: string;
+  fieldApiName: string;
+  profiles: Array<{ name: string; readable: boolean; editable: boolean }>;
+}> = {
+  name: "salesforce_manage_field_permissions",
+  label: "Manage field permissions",
+  description: "Grant or revoke read/edit access to a field for one or more profiles. Use to manage FLS after field creation or on existing fields.",
+  readOnly: false,
+  input: z.object({
+    orgId: z.string().uuid(),
+    objectApiName: z.string().min(1),
+    fieldApiName: z.string().min(1),
+    profiles: z.array(z.object({ name: z.string(), readable: z.boolean(), editable: z.boolean() })).min(1),
+  }).strict(),
+  async preview(input) {
+    return {
+      actionType: "manage_field_permissions",
+      summary: `Update FLS for ${input.objectApiName}.${input.fieldApiName} on ${input.profiles.length} profile${input.profiles.length !== 1 ? "s" : ""}`,
+      targets: [{ orgId: input.orgId, entity: `${input.objectApiName}.${input.fieldApiName}` }],
+      risks: ["Revoking access may break page layouts or validation rules that depend on this field"],
+      payload: input,
+    };
+  },
+  async execute(input, ctx) {
+    const conn = await ctx.getConnection(input.orgId);
+    return sfManageFieldPermissions(conn, input);
+  },
+};
+
+const salesforceWriteApex: ActionDefinition<{ orgId: string; name: string; body: string; apiVersion?: number }> = {
+  name: "salesforce_write_apex",
+  label: "Write Apex class",
+  description: "Create a new Apex class or update an existing class implementation. Specify the full class body including the class declaration.",
+  readOnly: false,
+  input: z.object({
+    orgId: z.string().uuid(),
+    name: z.string().min(1),
+    body: z.string().min(1),
+    apiVersion: z.number().int().optional(),
+  }).strict(),
+  async preview(input) {
+    const isTest = /@IsTest/i.test(input.body);
+    return {
+      actionType: "write_apex",
+      summary: `Write Apex class: ${input.name}${isTest ? " (test class)" : ""}`,
+      targets: [{ orgId: input.orgId, entity: input.name }],
+      risks: ["Compile errors will fail execution", "Updating an existing class replaces its current source"],
+      payload: input,
+    };
+  },
+  async execute(input, ctx) {
+    const conn = await ctx.getConnection(input.orgId);
+    return sfWriteApexClass(conn, input);
+  },
+};
+
+const salesforceWriteApexTrigger: ActionDefinition<{
+  orgId: string;
+  name: string;
+  objectApiName: string;
+  body: string;
+  apiVersion?: number;
+}> = {
+  name: "salesforce_write_apex_trigger",
+  label: "Write Apex trigger",
+  description: "Create a new Apex trigger or update an existing trigger. Provide the full trigger body including the trigger declaration.",
+  readOnly: false,
+  input: z.object({
+    orgId: z.string().uuid(),
+    name: z.string().min(1),
+    objectApiName: z.string().min(1),
+    body: z.string().min(1),
+    apiVersion: z.number().int().optional(),
+  }).strict(),
+  async preview(input) {
+    return {
+      actionType: "write_apex_trigger",
+      summary: `Write Apex trigger: ${input.name} on ${input.objectApiName}`,
+      targets: [{ orgId: input.orgId, entity: input.name }],
+      risks: [
+        "Compile errors will fail execution",
+        "Updating replaces current source",
+        "Triggers fire on every matching DML event — test in a sandbox first",
+      ],
+      payload: input,
+    };
+  },
+  async execute(input, ctx) {
+    const conn = await ctx.getConnection(input.orgId);
+    return sfWriteApexTrigger(conn, input);
+  },
+};
+
 // Registry + lookup
 
 export const ACTIONS: ActionDefinition<any, any, any>[] = [
@@ -398,6 +766,19 @@ export const ACTIONS: ActionDefinition<any, any, any>[] = [
   createCustomObject,
   createPermissionSet,
   assignPermissionSet,
+  salesforceSearchObjects,
+  salesforceDescribeObject,
+  salesforceQueryRecords,
+  salesforceAggregateQuery,
+  salesforceSearchAll,
+  salesforceReadApex,
+  salesforceReadApexTrigger,
+  salesforceDmlRecords,
+  salesforceManageObject,
+  salesforceManageField,
+  salesforceManageFieldPermissions,
+  salesforceWriteApex,
+  salesforceWriteApexTrigger,
 ];
 
 export function getAction(name: string): ActionDefinition<any, any, any> | undefined {

@@ -33,3 +33,38 @@ export async function assignPermissionSet(conn: Connection, input: AssignPermiss
   }
   return { id: result.id as string, success: true };
 }
+
+// ── dmlRecords ────────────────────────────────────────────────────────────────
+
+export interface DmlInput {
+  objectApiName: string;
+  operation: "insert" | "update" | "delete" | "upsert";
+  records: Record<string, unknown>[];
+  externalIdField?: string;
+}
+
+export async function dmlRecords(conn: Connection, input: DmlInput) {
+  const { objectApiName, operation, records, externalIdField } = input;
+  let raw: unknown;
+
+  if (operation === "insert") {
+    raw = await conn.sobject(objectApiName).create(records as any);
+  } else if (operation === "update") {
+    raw = await conn.sobject(objectApiName).update(records as any);
+  } else if (operation === "delete") {
+    const ids = records.map((r) => r.Id as string);
+    raw = await conn.sobject(objectApiName).destroy(ids);
+  } else {
+    if (!externalIdField) throw new Error("externalIdField is required for upsert");
+    raw = await conn.sobject(objectApiName).upsert(records as any, externalIdField);
+  }
+
+  const results: Array<{ id?: string; success: boolean; errors?: Array<{ message: string }> }> =
+    Array.isArray(raw) ? raw : [raw as any];
+  const failures = results.filter((r) => !r.success);
+  if (failures.length > 0) {
+    const msg = failures.map((r) => r.errors?.map((e) => e.message).join("; ") ?? "unknown").join("; ");
+    throw new Error(`DML ${operation} failed: ${msg}`);
+  }
+  return results.map((r) => ({ id: r.id, success: true }));
+}

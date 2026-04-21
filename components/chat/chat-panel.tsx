@@ -178,7 +178,7 @@ export function ChatPanel({
           },
           ...prev,
         ]);
-        router.push(`/dashboard/chat?session=${newId}`, { scroll: false });
+        window.history.pushState(null, "", `/dashboard/chat?session=${newId}`);
       }
       return response;
     };
@@ -261,6 +261,7 @@ export function ChatPanel({
           </div>
         ) : (
           <MessageList
+            key={initialSessionId ?? "new"}
             messages={messages}
             isLoading={isLoading}
             error={error ?? undefined}

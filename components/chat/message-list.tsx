@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { UIMessage } from "ai";
 import { getToolName } from "ai";
 import { BatchPreviewGroup } from "@/components/chat/batch-preview-group";
@@ -14,6 +14,7 @@ import type { ActionPreview } from "@/lib/actions/types";
  * Returns the full string immediately when `active` is false.
  */
 function useTypewriter(text: string, active: boolean): { displayed: string; done: boolean } {
+  // Initialized at 0 when active (component remounts via key when streaming ends).
   const [revealed, setRevealed] = useState(active ? 0 : text.length);
 
   useEffect(() => {
@@ -58,10 +59,16 @@ interface MessageListProps {
 
 export function MessageList({ messages, isLoading, error, onBatchResolved }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
-
-  // Messages present at mount were loaded from DB — eligible for typewriter animation.
-  // Messages that arrive after mount were streamed live (streaming is already animated).
-  const initialIdsRef = useRef<Set<string>>(new Set(messages.map((m) => m.id)));
+  // Bumped synchronously (before paint) each time streaming ends so AssistantTextRows
+  // remounts with useState(0) and the typewriter starts from scratch.
+  const [typewriterKey, setTypewriterKey] = useState(0);
+  const prevLoadingRef = useRef(isLoading);
+  useLayoutEffect(() => {
+    if (prevLoadingRef.current && !isLoading) {
+      setTypewriterKey((k) => k + 1);
+    }
+    prevLoadingRef.current = isLoading;
+  }, [isLoading]);
 
   const lastAssistantId = [...messages].reverse().find((m) => m.role === "assistant")?.id ?? null;
 
@@ -95,12 +102,9 @@ export function MessageList({ messages, isLoading, error, onBatchResolved }: Mes
                 <div className="min-w-0">
                   <ToolRows parts={msg.parts} onBatchResolved={onBatchResolved} />
                   <AssistantTextRows
+                    key={msg.id === lastAssistantId ? typewriterKey : 0}
                     parts={msg.parts}
-                    animate={
-                      msg.id === lastAssistantId &&
-                      !isLoading &&
-                      initialIdsRef.current.has(msg.id)
-                    }
+                    animate={msg.id === lastAssistantId && !isLoading}
                   />
                 </div>
               )}

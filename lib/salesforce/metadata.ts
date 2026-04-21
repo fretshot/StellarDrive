@@ -252,3 +252,87 @@ export async function listWorkflowRules(conn: Connection): Promise<WorkflowRuleS
     active: false,
   }));
 }
+
+// ── live query / search ───────────────────────────────────────────────────────
+
+export async function queryRecords(conn: Connection, soql: string): Promise<unknown[]> {
+  const res = await conn.query(soql);
+  return res.records as unknown[];
+}
+
+export async function aggregateQuery(conn: Connection, soql: string): Promise<unknown[]> {
+  const res = await conn.query(soql);
+  return res.records as unknown[];
+}
+
+export async function searchAll(conn: Connection, sosl: string): Promise<unknown[]> {
+  const res = await (conn as any).search(sosl);
+  return (res.searchRecords as unknown[]) ?? [];
+}
+
+// ── Apex class / trigger read (full body) ─────────────────────────────────────
+
+export interface ApexClassDetail {
+  id: string;
+  api_name: string;
+  api_version: string;
+  status: string;
+  body: string;
+  summary: Record<string, unknown>;
+}
+
+export async function readApexClass(conn: Connection, namePattern: string): Promise<ApexClassDetail[]> {
+  const soqlLike = namePattern.replace(/\*/g, "%").replace(/\?/g, "_").replace(/'/g, "''");
+  type Row = { Id: string; Name: string; NamespacePrefix: string | null; ApiVersion: number; Status: string; Body: string | null };
+  const res = await conn.tooling.query<Row>(
+    `SELECT Id, Name, NamespacePrefix, ApiVersion, Status, Body FROM ApexClass WHERE Name LIKE '${soqlLike}' LIMIT 25`,
+  );
+  return (res.records as Row[]).map((r) => {
+    const body = r.Body ?? "";
+    const apiName = r.NamespacePrefix ? `${r.NamespacePrefix}__${r.Name}` : r.Name;
+    return {
+      id: r.Id,
+      api_name: apiName,
+      api_version: String(r.ApiVersion),
+      status: r.Status,
+      body,
+      summary: {
+        namespace: r.NamespacePrefix ?? null,
+        length: body.length,
+        has_test_annotation: /@IsTest/i.test(body),
+      },
+    };
+  });
+}
+
+export interface ApexTriggerDetail {
+  id: string;
+  api_name: string;
+  object_name: string;
+  api_version: string;
+  status: string;
+  events: string[];
+  body: string;
+}
+
+export async function readApexTrigger(conn: Connection, namePattern: string): Promise<ApexTriggerDetail[]> {
+  const soqlLike = namePattern.replace(/\*/g, "%").replace(/\?/g, "_").replace(/'/g, "''");
+  type Row = { Id: string; Name: string; TableEnumOrId: string; ApiVersion: number; Status: string; Body: string | null };
+  const res = await conn.tooling.query<Row>(
+    `SELECT Id, Name, TableEnumOrId, ApiVersion, Status, Body FROM ApexTrigger WHERE Name LIKE '${soqlLike}' LIMIT 25`,
+  );
+  return (res.records as Row[]).map((r) => {
+    const body = r.Body ?? "";
+    const match = /trigger\s+\w+\s+on\s+\w+\s*\(([^)]+)\)/i.exec(body);
+    const events = match ? match[1].split(",").map((e) => e.trim().toLowerCase()) : [];
+    return {
+      id: r.Id,
+      api_name: r.Name,
+      object_name: r.TableEnumOrId,
+      api_version: String(r.ApiVersion),
+      status: r.Status,
+      events,
+      body,
+    };
+  });
+}

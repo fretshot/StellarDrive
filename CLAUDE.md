@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Product
 
-**StellarDrive** — multi-tenant SaaS that helps Salesforce admins analyze and manage their orgs through an AI-assisted chatbot. Individual-user ownership (no shared workspaces). Phase 1 is CREATE-only for metadata and records; update/delete are out of scope.
+**StellarDrive** — multi-tenant SaaS that helps Salesforce admins analyze and manage their orgs through an AI-assisted chatbot. Individual-user ownership (no shared workspaces). The AI supports full DML (insert, update, delete, upsert), metadata management, and Apex read/write — all via the preview → confirm → execute pipeline.
 
 ## Source of truth
 
@@ -51,8 +51,7 @@ There is no test suite yet — do not hunt for a test runner or script.
 
 ## Hard rules
 
-- **No update or delete actions** anywhere in Phase 1 — not in the registry, not in UI, not in docs. The system is intentionally CREATE-only.
-- **Every mutating action goes through preview → validate → confirm → execute → audit.** Never add a fast-path that skips the preview.
+- **Every mutating action goes through preview → validate → confirm → execute → audit.** Never add a fast-path that skips the preview. This applies to DML (insert/update/delete/upsert), metadata changes, and Apex writes.
 - **Secrets stay server-side.** `TOKEN_ENCRYPTION_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `ANTHROPIC_API_KEY`, `SALESFORCE_CLIENT_SECRET` must not be imported from any client component or file without a `"server-only"` import.
 - **RLS is enforced by default.** Use the service-role client only when you have already authenticated the caller server-side.
 - **Token encryption is non-negotiable.** Access and refresh tokens persist only as `bytea` ciphertext with per-row IVs.
