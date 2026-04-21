@@ -119,6 +119,25 @@ const listApexClasses: ActionDefinition<{ orgId: string; query?: string }> = {
   },
 };
 
+const searchPermissionSets: ActionDefinition<{ orgId: string; query: string }> = {
+  name: "search_permission_sets",
+  label: "Search permission sets",
+  description:
+    "Search Salesforce Permission Sets by Name or Label to get their Salesforce IDs (0PS…). " +
+    "Use this whenever you need a permission set ID from a prior conversation turn and cannot use $ref. " +
+    "Queries live Salesforce (not cached metadata).",
+  readOnly: true,
+  input: z.object({ orgId: z.string().uuid(), query: z.string().min(1) }).strict(),
+  async execute(input, ctx) {
+    const conn = await ctx.getConnection(input.orgId);
+    const safe = input.query.replace(/'/g, "''");
+    const result = await conn.query<{ Id: string; Name: string; Label: string }>(
+      `SELECT Id, Name, Label FROM PermissionSet WHERE (Name LIKE '%${safe}%' OR Label LIKE '%${safe}%') AND IsCustom = true LIMIT 10`,
+    );
+    return result.records;
+  },
+};
+
 const searchUsers: ActionDefinition<{ orgId: string; query: string }> = {
   name: "search_users",
   label: "Search users",
@@ -372,6 +391,7 @@ export const ACTIONS: ActionDefinition<any, any, any>[] = [
   listObjects,
   listFields,
   listApexClasses,
+  searchPermissionSets,
   searchUsers,
   createRecord,
   createCustomField,

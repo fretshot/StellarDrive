@@ -1,12 +1,40 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { UIMessage } from "ai";
 import { getToolName } from "ai";
 import { BatchPreviewGroup } from "@/components/chat/batch-preview-group";
 import type { ActionPreview } from "@/lib/actions/types";
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+// ── typewriter hook ───────────────────────────────────────────────────────────
+
+/**
+ * Reveals `text` character by character over ~1.4 s when `active` is true.
+ * Speed adapts so any length finishes in roughly the same time.
+ * Returns the full string immediately when `active` is false.
+ */
+function useTypewriter(text: string, active: boolean): { displayed: string; done: boolean } {
+  const [revealed, setRevealed] = useState(active ? 0 : text.length);
+
+  useEffect(() => {
+    if (!active) {
+      setRevealed(text.length);
+      return;
+    }
+    if (revealed >= text.length) return;
+    const charsPerTick = Math.max(1, Math.ceil(text.length / 115));
+    const id = setTimeout(
+      () => setRevealed((r) => Math.min(r + charsPerTick, text.length)),
+      12,
+    );
+    return () => clearTimeout(id);
+  }, [active, revealed, text.length]);
+
+  const count = active ? revealed : text.length;
+  return { displayed: text.slice(0, count), done: count >= text.length };
+}
+
+// ── helpers ───────────────────────────────────────────────────────────────────
 
 function formatToolName(name: string): string {
   return name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -23,12 +51,19 @@ interface MessageListProps {
   messages: UIMessage[];
   isLoading: boolean;
   error?: Error;
+  onBatchResolved?: (outcome: "executed" | "rejected", steps?: import("@/components/chat/batch-preview-group").StepResult[]) => void;
 }
 
 // ── main component ────────────────────────────────────────────────────────────
 
-export function MessageList({ messages, isLoading, error }: MessageListProps) {
+export function MessageList({ messages, isLoading, error, onBatchResolved }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Messages present at mount were loaded from DB — eligible for typewriter animation.
+  // Messages that arrive after mount were streamed live (streaming is already animated).
+  const initialIdsRef = useRef<Set<string>>(new Set(messages.map((m) => m.id)));
+
+  const lastAssistantId = [...messages].reverse().find((m) => m.role === "assistant")?.id ?? null;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -58,8 +93,15 @@ export function MessageList({ messages, isLoading, error }: MessageListProps) {
 
               {msg.role === "assistant" && (
                 <div className="min-w-0">
-                  <ToolRows parts={msg.parts} />
-                  <AssistantTextRows parts={msg.parts} />
+                  <ToolRows parts={msg.parts} onBatchResolved={onBatchResolved} />
+                  <AssistantTextRows
+                    parts={msg.parts}
+                    animate={
+                      msg.id === lastAssistantId &&
+                      !isLoading &&
+                      initialIdsRef.current.has(msg.id)
+                    }
+                  />
                 </div>
               )}
             </div>
@@ -129,7 +171,7 @@ function isPreviewOutput(output: unknown): output is PreviewOutput {
 }
 
 /** Renders tool-invocation rows from a set of assistant message parts. */
-function ToolRows({ parts }: { parts: Part[] }) {
+function ToolRows({ parts, onBatchResolved }: { parts: Part[]; onBatchResolved?: MessageListProps["onBatchResolved"] }) {
   const toolParts = parts.filter(
     (p): p is Extract<Part, { type: `tool-${string}` }> | Extract<Part, { type: "dynamic-tool" }> =>
       p.type === "dynamic-tool" || p.type.startsWith("tool-"),
@@ -228,9 +270,7 @@ function ToolRows({ parts }: { parts: Part[] }) {
             expiresAt: o.expiresAt,
           }))}
           messageId={batchMessageId}
-          onResolved={() => {
-            // No-op for Phase 1: the next assistant message turn will surface results.
-          }}
+          onResolved={(outcome, steps) => onBatchResolved?.(outcome, steps)}
         />
       )}
     </div>
@@ -238,18 +278,23 @@ function ToolRows({ parts }: { parts: Part[] }) {
 }
 
 /** Renders the text parts of an assistant message with inline markdown. */
-function AssistantTextRows({ parts }: { parts: Part[] }) {
+function AssistantTextRows({ parts, animate }: { parts: Part[]; animate?: boolean }) {
   const textParts = parts.filter(
     (p): p is Extract<Part, { type: "text" }> => p.type === "text",
   );
+  const fullText = textParts.map((p) => p.text).join("");
+
+  const { displayed, done } = useTypewriter(fullText, animate ?? false);
+  const text = animate ? displayed : fullText;
 
   if (textParts.length === 0) return null;
 
   return (
     <div className="text-sm leading-6 text-neutral-800 dark:text-neutral-200">
-      {textParts.map((p, i) => (
-        <AssistantText key={i} text={p.text} />
-      ))}
+      <AssistantText text={text} />
+      {animate && !done && (
+        <span className="animate-pulse font-mono text-neutral-400 dark:text-neutral-500">▎</span>
+      )}
     </div>
   );
 }

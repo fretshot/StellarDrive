@@ -12,6 +12,7 @@ import {
 import type { UIMessage } from "ai";
 import { SessionSidebar, type ChatSession } from "@/components/chat/session-sidebar";
 import { MessageList } from "@/components/chat/message-list";
+import type { StepResult } from "@/components/chat/batch-preview-group";
 import { ChatInput } from "@/components/chat/chat-input";
 import { EmptyState } from "@/components/ui/empty-state";
 
@@ -46,6 +47,7 @@ function createReactChatState<M extends UIMessage>(
     get error() { return error; },
     set error(v) { error = v; notify(); },
     get messages() { return messages; },
+    set messages(v) { messages = v; notify(); },
     pushMessage(msg) { messages = [...messages, msg]; notify(); },
     popMessage() { messages = messages.slice(0, -1); notify(); },
     replaceMessage(index, msg) {
@@ -230,6 +232,16 @@ export function ChatPanel({
     submitText(input);
   }
 
+  function handleBatchResolved(outcome: "executed" | "rejected", steps?: StepResult[]) {
+    if (outcome !== "executed") return;
+    const allOk = steps?.every((s) => s.status === "executed") ?? false;
+    const failCount = steps?.filter((s) => s.status === "failed").length ?? 0;
+    const text = allOk
+      ? "Confirmed — all actions executed successfully. Please briefly summarize what was done."
+      : `Batch completed with ${failCount} failure(s): ${steps?.filter((s) => s.status !== "executed").map((s) => s.error ?? "unknown error").join("; ")}. Please explain the outcome.`;
+    chat.sendMessage({ text });
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-1 overflow-hidden overscroll-none rounded-2xl border border-neutral-200 bg-white shadow-sm dark:border-neutral-800 dark:bg-neutral-950">
       <SessionSidebar
@@ -252,6 +264,7 @@ export function ChatPanel({
             messages={messages}
             isLoading={isLoading}
             error={error ?? undefined}
+            onBatchResolved={handleBatchResolved}
           />
         )}
         <ChatInput
