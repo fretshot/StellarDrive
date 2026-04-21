@@ -3,6 +3,7 @@ import { ChatPanel, type ChatOrgSummary } from "@/components/chat/chat-panel";
 import type { ChatSession } from "@/components/chat/session-sidebar";
 import type { UIMessage } from "ai";
 import { getActiveOrgId } from "@/lib/active-org";
+import { getMcpStatus } from "@/lib/mcp/client";
 
 const PREVIEW_TTL_MS = 15 * 60 * 1000;
 
@@ -49,6 +50,7 @@ export default async function ChatPage({
     .limit(50);
 
   const sessions: ChatSession[] = sessionRows ?? [];
+  const mcpStatus = await getMcpStatus();
 
   // Fetch messages for active session
   let initialMessages: UIMessage[] = [];
@@ -136,6 +138,7 @@ export default async function ChatPage({
         initialMessages={initialMessages}
         activeOrgId={activeOrgId}
         activeOrg={activeOrg}
+        mcpStatus={mcpStatus}
       />
     </section>
   );

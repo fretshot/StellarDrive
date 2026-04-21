@@ -143,11 +143,13 @@ export async function POST(req: Request) {
   // convertToModelMessages is async in AI SDK v6
   const modelMessages = await convertToModelMessages(messages);
 
+  const tools = await buildAiSdkTools(isReadOnly, ctx);
+
   const result = streamText({
     model: anthropic("claude-opus-4-7"),
     system: buildSystemPrompt(activeOrg),
     messages: modelMessages,
-    tools: buildAiSdkTools(isReadOnly, ctx),
+    tools,
     stopWhen: stepCountIs(10),
     onFinish: async ({ text, steps }) => {
       // In AI SDK v6, tool calls use `input` not `args`

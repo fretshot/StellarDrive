@@ -11,6 +11,7 @@ const schema = z.object({
   SALESFORCE_CLIENT_ID: z.string().optional().transform((v) => v || undefined),
   SALESFORCE_CLIENT_SECRET: z.string().optional().transform((v) => v || undefined),
   SALESFORCE_API_VERSION: z.string().default("62.0"),
+  SALESFORCE_MCP_SERVER_URL: z.string().url().optional().transform((v) => v || undefined),
   TOKEN_ENCRYPTION_KEY: z
     .string()
     .min(1)
