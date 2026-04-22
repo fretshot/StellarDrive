@@ -11,6 +11,9 @@ interface SessionSidebarProps {
   sessions: ChatSession[];
   activeSessionId: string | null;
   onNew: () => void;
+  // Bug 1: mobile open/close control
+  isOpen: boolean;
+  onClose: () => void;
 }
 
 function groupByDate(sessions: ChatSession[]) {
@@ -49,17 +52,28 @@ export function SessionSidebar({
   sessions,
   activeSessionId,
   onNew,
+  isOpen,
+  onClose,
 }: SessionSidebarProps) {
   const router = useRouter();
 
   function handleSelect(id: string) {
+    onClose(); // close sidebar on mobile after selecting
     router.push(`/dashboard/chat?session=${id}`);
   }
 
   const groups = groupByDate(sessions);
 
   return (
-    <aside className="flex h-full w-64 shrink-0 flex-col overflow-hidden border-r border-neutral-200 bg-neutral-50/80 dark:border-neutral-800 dark:bg-neutral-900/40">
+    // Bug 1: hidden on mobile unless isOpen; always visible on md+
+    <aside
+      className={`
+        z-30 flex h-full w-64 shrink-0 flex-col overflow-hidden border-r border-neutral-200
+        bg-neutral-50/80 dark:border-neutral-800 dark:bg-neutral-900/40
+        max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:transition-transform max-md:duration-200
+        ${isOpen ? "max-md:translate-x-0" : "max-md:-translate-x-full"}
+      `}
+    >
       <div className="border-b border-neutral-200 px-4 py-5 dark:border-neutral-800">
         <div className="mb-4">
           <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-neutral-500">
@@ -73,14 +87,14 @@ export function SessionSidebar({
           </div>
         </div>
         <button
-          onClick={onNew}
+          onClick={() => { onClose(); onNew(); }}
           className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm font-medium hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-950 dark:hover:bg-neutral-900"
         >
           + New Chat
         </button>
       </div>
 
-      <div className="flex-1 overflow-hidden px-2 py-3">
+      <div className="flex-1 overflow-y-auto px-2 py-3">
         {groups.length === 0 ? (
           <p className="px-3 py-2 text-xs text-neutral-500">No conversations yet</p>
         ) : (
@@ -93,6 +107,8 @@ export function SessionSidebar({
                 <button
                   key={s.id}
                   onClick={() => handleSelect(s.id)}
+                  aria-current={s.id === activeSessionId ? "page" : undefined}
+                  title={s.title}
                   className={`w-full rounded-xl px-3 py-2.5 text-left text-sm transition ${
                     s.id === activeSessionId
                       ? "bg-white shadow-sm ring-1 ring-neutral-200 dark:bg-neutral-950 dark:ring-neutral-800"

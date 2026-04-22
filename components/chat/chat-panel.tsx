@@ -24,15 +24,9 @@ const STARTER_PROMPTS = [
 ] as const;
 
 // ── v6 AbstractChat concrete implementation ───────────────────────────────────
-//
-// AI SDK v6 removed the useChat React hook from the `ai` package.
-// The `@ai-sdk/react` package (which provides useChat) is not installed.
-// Instead we subclass AbstractChat ourselves and drive React renders via
-// useSyncExternalStore. AbstractChat.state must be provided by the caller.
 
 type Listener = () => void;
 
-/** Minimal reactive ChatState implementation for React */
 function createReactChatState<M extends UIMessage>(
   initialMessages: M[],
   notify: () => void,
@@ -59,17 +53,13 @@ function createReactChatState<M extends UIMessage>(
 }
 
 class ReactChat extends AbstractChat<UIMessage> {
-  /** Subscription listeners (useSyncExternalStore). */
   private listeners = new Set<Listener>();
-  /** Cached snapshot — same reference until notify() fires. */
   private _snapshot!: { messages: UIMessage[]; status: ChatStatus; error: Error | undefined };
 
   constructor(
     messages: UIMessage[],
     transport: DefaultChatTransport<UIMessage>,
   ) {
-    // Use a ref-box so the notify closure can update _snapshot after super()
-    // sets `this` (notify is defined before super(), so `this` isn't yet available).
     const chatRef: { instance: ReactChat | null } = { instance: null };
     const listeners = new Set<Listener>();
 
@@ -88,10 +78,8 @@ class ReactChat extends AbstractChat<UIMessage> {
 
     super({ transport, state });
 
-    // Wire up after super() so chatRef.instance is valid when notify fires.
     chatRef.instance = this;
     this.listeners = listeners;
-    // Initialize snapshot with the post-construction values.
     this._snapshot = { messages: this.messages, status: this.status, error: this.error };
   }
 
@@ -123,6 +111,7 @@ interface ChatPanelProps {
   initialMessages: UIMessage[];
   activeOrgId: string | null;
   activeOrg: ChatOrgSummary | null;
+  mcpStatus?: { enabled: boolean; connected?: boolean; url?: string };
 }
 
 export interface ChatOrgSummary {
@@ -142,28 +131,33 @@ export function ChatPanel({
   initialMessages,
   activeOrgId,
   activeOrg,
+  mcpStatus: _mcpStatus,
 }: ChatPanelProps) {
   const router = useRouter();
   const [sessionId, setSessionId] = useState<string | null>(initialSessionId);
   const [sessions, setSessions] = useState<ChatSession[]>(initialSessions);
   const [input, setInput] = useState("");
+  // Bug 1: mobile sidebar toggle
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Bug 3: toast notification
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Keep a ref to the current input so the onFinish closure can read it without
-  // capturing a stale value.
   const inputRef = useRef(input);
   inputRef.current = input;
 
-  // sessionId ref so the fetch interceptor closure always reads the latest value.
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
 
-  // Build the chat instance. We recreate it when initialSessionId changes so
-  // the message history is reset for a different session.
+  // Bug 4: track last submitted text for retry
+  const lastSubmittedRef = useRef<string>("");
+
+  // Bug 5: per-session draft persistence
+  const draftMapRef = useRef<Map<string | null, string>>(new Map());
+
   const [chat, setChat] = useState<ReactChat>(() => buildChat());
 
   function buildChat(msgs: UIMessage[] = initialMessages): ReactChat {
-    // Custom fetch intercepts the response to capture X-Session-Id before
-    // the stream is consumed by the transport.
     const interceptingFetch: typeof fetch = async (input, init) => {
       const response = await globalThis.fetch(input, init);
       const newId = response.headers.get("X-Session-Id");
@@ -192,16 +186,31 @@ export function ChatPanel({
     return new ReactChat(msgs, transport);
   }
 
-  // Sync when the server navigates to a different session.
+  // Sync when server navigates to a different session — preserve / restore drafts.
   useEffect(() => {
+    // Bug 5: save current draft before leaving this session
+    const currentDraft = inputRef.current;
+    if (currentDraft) draftMapRef.current.set(sessionIdRef.current, currentDraft);
+
     setSessionId(initialSessionId);
     sessionIdRef.current = initialSessionId;
     setChat(buildChat(initialMessages));
+
+    // Bug 5: restore draft for the session we're switching to
+    const savedDraft = draftMapRef.current.get(initialSessionId) ?? "";
+    setInput(savedDraft);
+    inputRef.current = savedDraft;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialSessionId]);
 
   const { messages, status, error } = useReactChat(chat);
   const isLoading = status === "submitted" || status === "streaming";
+
+  function showToast(msg: string) {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast(msg);
+    toastTimerRef.current = setTimeout(() => setToast(null), 3000);
+  }
 
   async function handleDelete() {
     if (!sessionId) return;
@@ -209,6 +218,8 @@ export function ChatPanel({
     await deleteSession(deletedId);
     setSessions((prev) => prev.filter((s) => s.id !== deletedId));
     handleNew();
+    // Bug 3: confirm deletion with toast
+    showToast("Conversation deleted");
   }
 
   function handleNew() {
@@ -224,12 +235,20 @@ export function ChatPanel({
     const trimmed = text.trim();
     if (!trimmed || isLoading) return;
     inputRef.current = trimmed;
+    lastSubmittedRef.current = trimmed; // Bug 4: track for retry
     setInput("");
     chat.sendMessage({ text: trimmed });
   }
 
   function handleSubmit() {
     submitText(input);
+  }
+
+  // Bug 4: retry last failed message
+  function handleRetry() {
+    const text = lastSubmittedRef.current;
+    if (!text || isLoading) return;
+    chat.sendMessage({ text });
   }
 
   function handleBatchResolved(outcome: "executed" | "rejected", steps?: StepResult[]) {
@@ -243,15 +262,31 @@ export function ChatPanel({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-1 overflow-hidden overscroll-none rounded-2xl border border-neutral-200 bg-white shadow-sm dark:border-neutral-800 dark:bg-neutral-950">
+    <div className="relative flex h-full min-h-0 flex-1 overflow-hidden overscroll-none rounded-2xl border border-neutral-200 bg-white shadow-sm dark:border-neutral-800 dark:bg-neutral-950">
+      {/* Bug 1: mobile backdrop — tap to close sidebar */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-20 bg-black/30 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
       <SessionSidebar
         sessions={sessions}
         activeSessionId={sessionId}
         onNew={handleNew}
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
       />
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <ChatHeader sessionId={sessionId} onReset={handleNew} onDelete={handleDelete} />
+        <ChatHeader
+          sessionId={sessionId}
+          onReset={handleNew}
+          onDelete={handleDelete}
+          onToggleSidebar={() => setSidebarOpen((v) => !v)}
+        />
         {sessionId === null && messages.length === 0 ? (
           <div className="flex flex-1 items-center justify-center p-8">
             <ChatWelcomeState
@@ -266,6 +301,7 @@ export function ChatPanel({
             isLoading={isLoading}
             error={error ?? undefined}
             onBatchResolved={handleBatchResolved}
+            onRetry={error ? handleRetry : undefined}
           />
         )}
         <ChatInput
@@ -276,6 +312,17 @@ export function ChatPanel({
           activeOrgName={activeOrg?.name ?? null}
         />
       </div>
+
+      {/* Bug 3: toast */}
+      {toast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="pointer-events-none absolute bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-xl bg-neutral-900 px-4 py-2.5 text-sm font-medium text-white shadow-lg dark:bg-neutral-100 dark:text-neutral-900"
+        >
+          {toast}
+        </div>
+      )}
     </div>
   );
 }
@@ -284,10 +331,12 @@ function ChatHeader({
   sessionId,
   onReset,
   onDelete,
+  onToggleSidebar,
 }: {
   sessionId: string | null;
   onReset: () => void;
   onDelete: () => void;
+  onToggleSidebar: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -298,22 +347,46 @@ function ChatHeader({
         setOpen(false);
       }
     }
-    if (open) document.addEventListener("mousedown", onClickOutside);
-    return () => document.removeEventListener("mousedown", onClickOutside);
+    // Bug 2: ESC closes menu
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    if (open) {
+      document.addEventListener("mousedown", onClickOutside);
+      document.addEventListener("keydown", onKeyDown);
+    }
+    return () => {
+      document.removeEventListener("mousedown", onClickOutside);
+      document.removeEventListener("keydown", onKeyDown);
+    };
   }, [open]);
 
   return (
-    <div className="shrink-0 border-b border-neutral-200 bg-white/90 px-6 py-3 backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/90">
-      <div className="mx-auto flex w-full max-w-4xl items-start justify-between">
-        <div>
+    <div className="shrink-0 border-b border-neutral-200 bg-white/90 px-4 py-3 backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/90 md:px-6">
+      <div className="mx-auto flex w-full max-w-4xl items-center justify-between gap-3">
+        {/* Bug 1: hamburger — mobile only */}
+        <button
+          onClick={onToggleSidebar}
+          aria-label="Toggle sidebar"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200 md:hidden"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <rect x="2" y="3.5" width="12" height="1.25" rx="0.625" />
+            <rect x="2" y="7.375" width="12" height="1.25" rx="0.625" />
+            <rect x="2" y="11.25" width="12" height="1.25" rx="0.625" />
+          </svg>
+        </button>
+
+        <div className="min-w-0 flex-1">
           <h1 className="text-sm font-semibold text-neutral-950 dark:text-neutral-50">
             StellarDrive Assistant
           </h1>
-          <p className="text-xs text-neutral-500">
-            Read metadata, inspect org structure, and prepare create-only action previews.
+          <p className="truncate text-xs text-neutral-500">
+            Read metadata, inspect org structure, and prepare action previews.
           </p>
         </div>
-        <div className="relative" ref={menuRef}>
+
+        <div className="relative shrink-0" ref={menuRef}>
           <button
             onClick={() => setOpen((v) => !v)}
             aria-label="More options"

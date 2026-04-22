@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { UIMessage } from "ai";
 import { getToolName } from "ai";
 import { BatchPreviewGroup } from "@/components/chat/batch-preview-group";
@@ -53,12 +53,13 @@ interface MessageListProps {
   isLoading: boolean;
   error?: Error;
   onBatchResolved?: (outcome: "executed" | "rejected", steps?: import("@/components/chat/batch-preview-group").StepResult[]) => void;
+  onRetry?: () => void;
 }
 
 // ── main component ────────────────────────────────────────────────────────────
 
-export function MessageList({ messages, isLoading, error, onBatchResolved }: MessageListProps) {
-  const bottomRef = useRef<HTMLDivElement>(null);
+export function MessageList({ messages, isLoading, error, onBatchResolved, onRetry }: MessageListProps) {
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   // Bumped synchronously (before paint) each time streaming ends so AssistantTextRows
   // remounts with useState(0) and the typewriter starts from scratch.
   const [typewriterKey, setTypewriterKey] = useState(0);
@@ -72,9 +73,16 @@ export function MessageList({ messages, isLoading, error, onBatchResolved }: Mes
 
   const lastAssistantId = [...messages].reverse().find((m) => m.role === "assistant")?.id ?? null;
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  // Scroll to bottom on new messages and loading state changes.
+  useLayoutEffect(() => {
+    const el = scrollContainerRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [messages, isLoading]);
+
+  const scrollToBottom = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, []);
 
   if (messages.length === 0 && !isLoading) {
     return (
@@ -86,8 +94,8 @@ export function MessageList({ messages, isLoading, error, onBatchResolved }: Mes
 
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden">
-      <div className="flex min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-8 py-8">
+      <div ref={scrollContainerRef} className="flex min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-8 pt-12 pb-16">
           {messages.map((msg) => (
             <div key={msg.id}>
               {msg.role === "user" && (
@@ -105,6 +113,7 @@ export function MessageList({ messages, isLoading, error, onBatchResolved }: Mes
                     key={msg.id === lastAssistantId ? typewriterKey : 0}
                     parts={msg.parts}
                     animate={msg.id === lastAssistantId && !isLoading}
+                    onTick={msg.id === lastAssistantId ? scrollToBottom : undefined}
                   />
                 </div>
               )}
@@ -121,12 +130,19 @@ export function MessageList({ messages, isLoading, error, onBatchResolved }: Mes
           )}
 
           {error && (
-            <div className="w-full rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
-              Response interrupted — try again.
+            <div className="flex w-full items-center justify-between gap-4 rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
+              <span>Response interrupted — try again.</span>
+              {onRetry && (
+                <button
+                  onClick={onRetry}
+                  className="shrink-0 rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 dark:border-red-700 dark:bg-red-950 dark:text-red-300 dark:hover:bg-red-900"
+                >
+                  Retry
+                </button>
+              )}
             </div>
           )}
 
-          <div ref={bottomRef} />
         </div>
       </div>
     </div>
@@ -282,7 +298,7 @@ function ToolRows({ parts, onBatchResolved }: { parts: Part[]; onBatchResolved?:
 }
 
 /** Renders the text parts of an assistant message with inline markdown. */
-function AssistantTextRows({ parts, animate }: { parts: Part[]; animate?: boolean }) {
+function AssistantTextRows({ parts, animate, onTick }: { parts: Part[]; animate?: boolean; onTick?: () => void }) {
   const textParts = parts.filter(
     (p): p is Extract<Part, { type: "text" }> => p.type === "text",
   );
@@ -290,6 +306,12 @@ function AssistantTextRows({ parts, animate }: { parts: Part[]; animate?: boolea
 
   const { displayed, done } = useTypewriter(fullText, animate ?? false);
   const text = animate ? displayed : fullText;
+
+  // Fire scroll after each typewriter tick so the container follows new text.
+  useLayoutEffect(() => {
+    if (animate && onTick) onTick();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [displayed]);
 
   if (textParts.length === 0) return null;
 

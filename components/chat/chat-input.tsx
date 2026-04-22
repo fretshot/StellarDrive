@@ -1,5 +1,28 @@
 "use client";
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
+
+const PLACEHOLDERS = [
+  "What should we do today?",
+  "What are we doing today?",
+  "What's the plan for today?",
+  "What can we get into today?",
+  "What do you want to do today?",
+  "Any ideas for today?",
+  "How should we spend today?",
+  "What's on the agenda today?",
+  "What are our options for today?",
+  "What's something fun we can do today?",
+  "What do we feel like doing today?",
+  "What's the move for today?",
+  "Got any plans for today?",
+  "What could we try today?",
+  "What are we up for today?",
+  "What's worth doing today?",
+  "What's the game plan for today?",
+  "What do we have going on today?",
+  "What should we get started with today?",
+  "What's something we can do together today?",
+];
 
 interface ChatInputProps {
   value: string;
@@ -11,6 +34,7 @@ interface ChatInputProps {
 
 export function ChatInput({ value, onChange, onSubmit, isLoading, activeOrgName }: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [placeholder] = useState(() => PLACEHOLDERS[Math.floor(Math.random() * PLACEHOLDERS.length)]);
 
   useEffect(() => {
     const ta = textareaRef.current;
@@ -29,7 +53,7 @@ export function ChatInput({ value, onChange, onSubmit, isLoading, activeOrgName 
   }
 
   return (
-    <div className="shrink-0 border-t border-neutral-200 bg-white/95 px-6 py-4 backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/95">
+    <div className="shrink-0 bg-white/95 px-6 py-6 backdrop-blur dark:bg-neutral-950/95">
       <div className="mx-auto w-full max-w-4xl">
         <div className="flex items-end gap-3 rounded-2xl border border-neutral-300 bg-neutral-50 p-3 shadow-sm dark:border-neutral-700 dark:bg-neutral-900">
           <textarea
@@ -38,7 +62,7 @@ export function ChatInput({ value, onChange, onSubmit, isLoading, activeOrgName 
             onChange={(e) => onChange(e.target.value)}
             onKeyDown={handleKeyDown}
             disabled={isLoading}
-            placeholder={activeOrgName ? `Ask about ${activeOrgName}…` : "Ask anything…"}
+            placeholder={activeOrgName ? `Ask about ${activeOrgName}…` : placeholder}
             rows={1}
             className="min-h-11 flex-1 resize-none bg-transparent px-1 py-2 text-sm focus:outline-none disabled:opacity-50"
           />
@@ -55,6 +79,9 @@ export function ChatInput({ value, onChange, onSubmit, isLoading, activeOrgName 
             )}
           </button>
         </div>
+        <p className="mt-2 text-center text-[11px] text-neutral-400 dark:text-neutral-600">
+          StellarDrive can make mistakes. Verify important information.
+        </p>
       </div>
     </div>
   );
